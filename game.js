@@ -10,7 +10,7 @@ const SHUFFLE_CD=4;                                          // seconds between 
 const TOTAL_BOXES=50, LOCK_ROWS=5;                           // finite stock: 50 boxes (150 items) in the whole store; each locked shelf holds 5 boxes' worth
 const START_FRONTS=9;                                        // front items on the open shelves at the start (leaves empty slots, since items can't swap)                                          // items dealt into the starting open shelves (8 sets of 3)
 const UNLOCK_AT=[6,8,10,12,14];                               // boxes needed for each
-const ITEM_TYPES=12, HAPPY_JUMP=22, HAPPY_STAND=11;           // ending thresholds
+const ITEM_TYPES=12, HAPPY_JUMP=24, HAPPY_STAND=11;           // ending thresholds
 
 // ===================== 2. DRAW HELPERS (same helpers/palette as Momo Pudding Panic) =====================
 const cv=document.getElementById('c'),ctx=cv.getContext('2d');let S=1;
