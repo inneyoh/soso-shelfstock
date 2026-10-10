@@ -415,7 +415,7 @@ function drawOver(){ctx.fillStyle='rgba(244,249,255,.93)';ctx.fillRect(0,0,W,H);
  else if(boxes>=HAPPY_STAND){drawSoso(150,505,K,{face:'n',arms:'side'});line='Nice and tidy!'}
  else{const kk=Math.max(0,sn(t*4));drawSoso(150,505,K,{face:'a',arms:'side',kick:kk,prop:()=>boxU('box_closed',315+kk*16,GY-2,null,1)});line='Hmph... restocking is hard.'}
  txt(line,W/2,556,19,'#8a6a7c');if(endT>.8)txt('Tap to play again',W/2,600,21,'#ff6b9a')}
-function drawTitle(){txt("Soso Shelf Stock",W/2,100,34,'#ff6b9a');txt('Drag items into empty spaces.',W/2,142,15);
+function drawTitle(){txt("Soso Stock Shuffle",W/2,100,34,'#ff6b9a');txt('Drag items into empty spaces.',W/2,142,15);
  txt('Match 3 on a shelf - back rows slide forward!',W/2,166,15);for(let i=0;i<ITEM_TYPES;i++)drawItem(i,48+(i%6)*53,214+Math.floor(i/6)*56,.95);
  drawSoso(W/2,540,.66,{face:'h',arms:'side'});txt('Tap to start',W/2,610,22,'#ff6b9a')}
 function draw(){ctx.setTransform(S,0,0,S,0,0);drawBG();if(state=='title'){drawTitle();return}
