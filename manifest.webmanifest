@@ -1,6 +1,6 @@
 {
-  "name": "Soso Shelf Stock",
-  "short_name": "Soso Stock",
+  "name": "Soso Stock Shuffle",
+  "short_name": "Soso Stock Shuffle",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
