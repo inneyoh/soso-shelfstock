@@ -1,0 +1,23 @@
+{
+  "name": "Soso Shelf Stock",
+  "short_name": "Soso Stock",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#e2eee5",
+  "theme_color": "#e2eee5",
+  "icons": [
+    {
+      "src": "asset/icons/soso-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "asset/icons/soso-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}
