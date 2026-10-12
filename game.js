@@ -17,7 +17,7 @@ const GAME_SETTINGS = {
     minWindow: 7,                  // Shortest combo countdown.
     fastAt: 30,                    // Countdown reaches minWindow at this combo.
     max: 50,                      // Maximum displayed multiplier.
-    bonusAt: 3, bonusSeconds: 5,    // Reward at every new multiple of bonusAt.
+    bonusAt: 3, bonusSeconds: 4,    // Reward at every new multiple of bonusAt.
     maxBonusSeconds: 2             // Reward on each match at the maximum combo.
   }
 };
