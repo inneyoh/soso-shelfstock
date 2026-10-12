@@ -404,7 +404,7 @@ function drawPauseScreen(){
  ctx.fillStyle='rgba(244,249,255,.95)';ctx.fillRect(0,0,W,H);
  txt('Paused',W/2,166,36,'#ff6b9a');
  if(pauseSoso.complete&&pauseSoso.naturalWidth){const h=270,w=h*pauseSoso.naturalWidth/pauseSoso.naturalHeight;ctx.drawImage(pauseSoso,W/2-w/2,193,w,h);}
- rr(...PAUSE_RESUME,22,grad(495,539,'#9fd0ff','#5aa5f0'),'#2a6fc4',3);txt('Resume game',W/2,523,18,'#8A6A7C');
+ rr(...PAUSE_RESUME,22,grad(495,539,'#9fd0ff','#5aa5f0'),'#2a6fc4',3);txt('Resume game',W/2,523,18);
  drawRestartButton();
 }
 function drawConfirmLabel(label,x,y){
