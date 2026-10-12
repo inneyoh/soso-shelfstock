@@ -132,7 +132,9 @@ function getRestockPlan(cp){
  const heads=cp.slots.map(s=>s.q[0]||null),types=heads.map(it=>it?.t);
  if(cp.restockPlan&&heads.every((it,i)=>it===cp.restockHeads[i]&&types[i]===cp.restockTypes[i]))return cp.restockPlan;
  const available=shuf([0,1,2].filter(i=>heads[i]));
- let count=available.length?1+rnd(available.length):0;
+ const roll = Math.random();
+ let count = roll < 0.20 ? 1 : roll < 0.35 ? 2 : 3;
+ count = Math.min(count, available.length);
  // Never preview a batch that would arrive already matched.
  if(count===3&&heads.every(it=>it.t===heads[0].t))count=2;
  cp.restockHeads=heads;cp.restockTypes=types;cp.restockPlan=available.slice(0,count);
