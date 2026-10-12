@@ -17,8 +17,8 @@ const GAME_SETTINGS = {
     minWindow: 7,                  // Shortest combo countdown.
     fastAt: 30,                    // Countdown reaches minWindow at this combo.
     max: 50,                      // Maximum displayed multiplier.
-    bonusAt: 5, bonusSeconds: 3,    // Reward at every new multiple of bonusAt.
-    maxBonusSeconds: 1             // Reward on each match at the maximum combo.
+    bonusAt: 3, bonusSeconds: 5,    // Reward at every new multiple of bonusAt.
+    maxBonusSeconds: 2             // Reward on each match at the maximum combo.
   }
 };
 // ===================== 1B. APPEARANCE / FIXED BOARD STRUCTURE =====================
