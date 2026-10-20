@@ -44,6 +44,7 @@ const rr=(x,y,w,h,r,f,k,lw)=>{ctx.beginPath();ctx.roundRect(x,y,w,h,r);if(f){ctx
 const ci=(x,y,r,f,k,lw)=>{ctx.beginPath();ctx.arc(x,y,r,0,7);if(f){ctx.fillStyle=f;ctx.fill()}if(k){ctx.strokeStyle=k;ctx.lineWidth=lw||2;ctx.stroke()}};
 const grad=(y0,y1,a,b)=>{const g=ctx.createLinearGradient(0,y0,0,y1);g.addColorStop(0,a);g.addColorStop(1,b);return g};
 function poly(p,f,k,lw){ctx.beginPath();ctx.moveTo(p[0][0],p[0][1]);p.slice(1).forEach(q=>ctx.lineTo(q[0],q[1]));ctx.closePath();ctx.fillStyle=f;ctx.fill();ctx.strokeStyle=k;ctx.lineWidth=lw||2;ctx.lineJoin='round';ctx.stroke()}
+['500','700'].forEach(w=>{try{document.fonts.load(w+' 20px Fredoka')}catch(e){}});   // load Fredoka before the first menu draw
 function txt(s,x,y,z,f,al){ctx.font='700 '+z+'px '+F;ctx.textAlign=al||'center';ctx.lineJoin='round';ctx.lineWidth=z/4;ctx.strokeStyle='#fff';ctx.strokeText(s,x,y);ctx.fillStyle=f||'#3d5a80';ctx.fillText(s,x,y)}
 
 // ===================== 3. ITEM ASSETS =====================
@@ -96,23 +97,42 @@ function drawSoso(x,y,k,o){o=o||{};const f=o.face||'n',ph=o.ph||0,sn=Math.sin,PI
  hand('hl_'+f,hcur[0],sw*sn(ph)*13);hand('hr_'+f,hcur[1],-sw*sn(ph)*13);
  ctx.restore()}
 
-// ===================== 5. GAMEPLAY MUSIC =====================
-// Keep this path aligned with the folder name in GitHub (asset, singular).
-const gameplayMusic = new Audio('asset/audio/stockspree.mp3');
-gameplayMusic.loop = true;
-gameplayMusic.volume = 0.5; // Edit from 0 (silent) to 1 (full volume).
-gameplayMusic.preload = 'auto';
-let musicState = '';
-function playGameplayMusic(){
- const pending = gameplayMusic.play();
- if(pending)pending.catch(() => {}); // Browsers may require another user tap.
+// ===================== 5. MUSIC + VOLUME =====================
+// ONE background track plays from the first moment the browser allows sound and is never stopped, rewound or restarted by
+// the game (new game, pause, home, mute…). "Mute" only turns the volume to 0 - the track keeps running underneath.
+// Browsers refuse sound until the player touches the page, so the track is started immediately on load AND retried on the
+// very first tap / click / key press.
+const MUSIC_FILE='asset/audio/stockspree.mp3';            // keep the folder name aligned with GitHub (asset, singular)
+const VOLUME_LEVELS=[0,.25,.5,1];                          // Mute, 1, 2, 3 - edit these numbers (0 silent … 1 full)
+const VOLUME_LABELS=['Mute','1','2','3'];
+const VOLUME_KEY='sosoStockShuffle.volume',BEST_KEY='sosoStockShuffle.best';
+const store={get(k){try{return localStorage.getItem(k)}catch(e){return null}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
+let volumeLevel=2;{const v=parseInt(store.get(VOLUME_KEY),10);if(v>=0&&v<VOLUME_LEVELS.length)volumeLevel=v}
+const gameplayMusic=new Audio(MUSIC_FILE);
+gameplayMusic.loop=true;gameplayMusic.preload='auto';
+// iPhone Safari ignores audio.volume, so on iOS the level is applied through a Web Audio gain node instead.
+const volumeSettable=(()=>{try{const a=new Audio();a.volume=.5;return a.volume===.5}catch(e){return true}})();
+let audioCtx=null,gainNode=null;
+function connectGain(){
+ if(volumeSettable||gainNode)return;
+ try{const AC=window.AudioContext||window.webkitAudioContext;audioCtx=new AC();
+  const src=audioCtx.createMediaElementSource(gameplayMusic);gainNode=audioCtx.createGain();src.connect(gainNode);gainNode.connect(audioCtx.destination);}catch(e){gainNode=null}
 }
-function syncGameplayMusic(){
- if(musicState === state)return;
- musicState = state;
- if(state === 'play')playGameplayMusic();
- else gameplayMusic.pause();
+function applyVolume(){const v=VOLUME_LEVELS[volumeLevel];if(volumeSettable)gameplayMusic.volume=v;else if(gainNode)gainNode.gain.value=v;}
+function setVolumeLevel(n){volumeLevel=n;store.set(VOLUME_KEY,String(n));applyVolume();}
+const UNLOCK_EVENTS=['pointerdown','pointerup','touchend','mouseup','click','keydown'];
+let musicWanted=true;                                      // false only while the browser tab is hidden
+function armUnlock(){UNLOCK_EVENTS.forEach(ev=>addEventListener(ev,unlockMusic,true));}
+function disarmUnlock(){UNLOCK_EVENTS.forEach(ev=>removeEventListener(ev,unlockMusic,true));}
+function unlockMusic(){if(musicWanted)startMusic();}
+function startMusic(){
+ connectGain();applyVolume();
+ if(audioCtx&&audioCtx.state==='suspended')audioCtx.resume().catch(()=>{});
+ const p=gameplayMusic.play();
+ if(p)p.then(disarmUnlock).catch(armUnlock);               // blocked → try again on the next touch
 }
+armUnlock();applyVolume();startMusic();
+document.addEventListener('visibilitychange',()=>{if(document.hidden){musicWanted=false;gameplayMusic.pause()}else{musicWanted=true;startMusic()}});
 
 // ===================== 6. GAME STATE =====================
 // G[r][c] = {lock:index|-1, slots:[{f:front item, b:item hidden behind}, x3]}   item = {t,x,y,pop}
@@ -177,7 +197,7 @@ function deal(){let bad=true,tries=0;while(bad){G=[];
   rows.forEach((rw,j)=>rw.forEach((t,i)=>{if(j==0)G[r][c].slots[i].f=mk(t,r,c,i);else G[r][c].slots[i].q.push(it(t))}))});
  preventBackTriples();bad=anyTri();for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++)if(rowsTri(G[r][c]))bad=true;
  if(!bad&&tries++<300&&easyCount()<2)bad=true}}
-function newGame(){resetComboGame();boxes=0;time=GAME_TIME;sel=null;flyers=[];phase='idle';pt=0;sx=0;queued=0;boxItems=[];lid=0;msg.t=0;deal();drag=null;shufCD=0;state='play';refreshAnim=null;autoCheckTimer=.25;lastCheckedBoard='';gameplayMusic.currentTime=0;playGameplayMusic()}
+function newGame(){resetComboGame();boxes=0;time=GAME_TIME;sel=null;flyers=[];phase='idle';pt=0;sx=0;queued=0;boxItems=[];lid=0;msg.t=0;deal();drag=null;shufCD=0;state='play';refreshAnim=null;autoCheckTimer=.25;lastCheckedBoard='';TUT=null;scoreSaved=false;soundOpen=false}
 
 // ===================== COMBO SETTINGS / STATE =====================
 
@@ -385,9 +405,9 @@ let homePromptPrevious='play';
 const PAUSE_RESUME=[110,495,140,44],HOME_YES=[74,345,94,42],HOME_NO=[192,345,94,42];
 const pauseSoso=new Image();pauseSoso.src='asset/soso/soso-pause.png';
 const inside=(x,y,b)=>x>=b[0]&&x<=b[0]+b[2]&&y>=b[1]&&y<=b[1]+b[3];
-function openHomePrompt(){homePromptPrevious=state;state='homePrompt';drag=null;gameplayMusic.pause();}
+function openHomePrompt(){homePromptPrevious=state;state='homePrompt';drag=null;}
 function returnToHome(){
- state='title';refreshAnim=null;drag=null;G=[];boxes=0;time=GAME_TIME;flyers=[];queued=0;phase='idle';pt=0;sx=0;ex=0;boxItems=[];hcur=null;resetComboGame();gameplayMusic.pause();gameplayMusic.currentTime=0;
+ state='title';refreshAnim=null;drag=null;G=[];boxes=0;time=GAME_TIME;flyers=[];queued=0;phase='idle';pt=0;sx=0;ex=0;boxItems=[];hcur=null;resetComboGame();TUT=null;soundOpen=false;shufCD=0;refreshAnim=null;
 }
 function drawRestartButton(){
  const [rx,ry,rad]=RESTART_BTN;ci(rx,ry,rad,'#5ba8ef','#2a6fc4',2);
@@ -412,53 +432,64 @@ function drawHomePrompt(){
  rr(...HOME_NO,16,'#f7b6ce',B,2.5);drawConfirmLabel('No',239,372);
 }
 
-const PAUSE_BTN=[340,24,13],RESTART_BTN=[302,24,13];
-function setPause(on){if(on&&state=='play'){state='pause';drag=null;gameplayMusic.pause()}else if(!on&&state=='pause'){state='play';playGameplayMusic()}}
+const PAUSE_BTN=[340,24,13],RESTART_BTN=[302,24,13],SOUND_BTN=[264,24,13];
+function setPause(on){if(TUT)return;if(on&&state=='play'){state='pause';drag=null}else if(!on&&state=='pause'){state='play'}}
 function tap(px,py){
  if(state==='homePrompt'){
   if(inside(px,py,HOME_YES))returnToHome();
-  else if(inside(px,py,HOME_NO)){state=homePromptPrevious;if(state==='play')playGameplayMusic();}
+  else if(inside(px,py,HOME_NO)){state=homePromptPrevious;}
   return true;
  }
-   // menu buttons; returns true if the touch was used
+ // menu buttons; returns true if the touch was used
  if(refreshAnim)return true;
- if(state=='title'){newGame();return true}
+ if(state=='title'||state=='option')return true;           // menu screens are handled by pointer press/release (see UI)
  if(state=='over'){if(endT>.8)newGame();return true}
+ if(soundOpen){soundPopupTap(px,py);return true}
+ if(TUT&&tutorialButtonTap(px,py))return true;
  if(Math.hypot(px-RESTART_BTN[0],py-RESTART_BTN[1])<RESTART_BTN[2]+5){openHomePrompt();return true}
  if(state=='pause'){if(inside(px,py,PAUSE_RESUME))setPause(false);return true}
- if(Math.hypot(px-PAUSE_BTN[0],py-PAUSE_BTN[1])<PAUSE_BTN[2]+6){setPause(true);return true}
- if(px>=SOSO_X+sx-45&&px<=SOSO_X+sx+80&&py>=GROUND-112&&py<=GROUND+7){if(shufCD<=0){beginRefresh(false);shufCD=SHUFFLE_CD}return true}
+ if(Math.hypot(px-SOUND_BTN[0],py-SOUND_BTN[1])<SOUND_BTN[2]+6){soundOpen=true;drag=null;return true}
+ if(!TUT&&Math.hypot(px-PAUSE_BTN[0],py-PAUSE_BTN[1])<PAUSE_BTN[2]+6){setPause(true);return true}
+ if(px>=SOSO_X+sx-45&&px<=SOSO_X+sx+80&&py>=GROUND-112&&py<=GROUND+7){
+  if(TUT){if(TUT.step===5&&!TUT.refreshStarted){TUT.refreshStarted=true;beginRefresh(false);shufCD=SHUFFLE_CD}return true}
+  if(shufCD<=0){beginRefresh(false);shufCD=SHUFFLE_CD}return true}
  return false}
 // ---- DRAG AND DROP: items only go into EMPTY slots (no swapping). Dropping on a shelf uses its nearest empty slot.
 const ptr=e=>{const b=cv.getBoundingClientRect();return[(e.clientX-b.left)/b.width*W,(e.clientY-b.top)/b.height*H]};
 function dropTarget(px,py){const c=Math.floor((px-X0)/CWD),r=Math.floor((py-Y0)/RH);if(c<0||c>=COLS||r<0||r>=ROWS||!isOpen(r,c))return null;
  let best=null,bd=1e9;for(let i=0;i<3;i++){if(blocked(r,c,i)||G[r][c].slots[i].f)continue;const d=Math.abs(px-slotX(c,i));if(d<bd){bd=d;best=[r,c,i]}}return best}
-cv.addEventListener('pointerdown',e=>{const[px,py]=ptr(e);if(tap(px,py))return;
+cv.addEventListener('pointerdown',e=>{const[px,py]=ptr(e);
+ if(state==='title'||state==='option'){UI.press=menuHit(px,py);try{cv.setPointerCapture(e.pointerId)}catch(_){}return}
+ if(tap(px,py))return;
  const c=Math.floor((px-X0)/CWD),r=Math.floor((py-Y0)/RH);if(state!='play'||c<0||c>=COLS||r<0||r>=ROWS||!isOpen(r,c))return;
  const i=Math.max(0,Math.min(2,Math.floor((px-X0-c*CWD-6)/((CWD-12)/3))));if(blocked(r,c,i))return;const s=G[r][c].slots[i];
+ if(TUT&&!tutorialCanDrag(r,c,i))return;
  if(s.f){drag={r,c,i,it:s.f,px,py};s.f.pop=.3;s.f.x=px;s.f.y=py-16;try{cv.setPointerCapture(e.pointerId)}catch(_){}}});
 cv.addEventListener('pointermove',e=>{if(!drag)return;const[px,py]=ptr(e);drag.px=px;drag.py=py;drag.it.x=px;drag.it.y=py-16});
-cv.addEventListener('pointerup',e=>{if(!drag)return;const[px,py]=ptr(e),d=drag;drag=null;if(state!='play')return;const t=dropTarget(px,py);
+cv.addEventListener('pointerup',e=>{
+ if(UI.press){const[ux,uy]=ptr(e),id=menuHit(ux,uy),was=UI.press;UI.press=null;if(id===was)menuActivate(id);return}
+ if(!drag)return;const[px,py]=ptr(e),d=drag;drag=null;if(state!='play')return;const t=dropTarget(px,py);
+ if(t&&TUT&&!tutorialCanDrop(d,t)){msg={t:1.4,s:'Drop it in the glowing slot!'};return}
  if(t){G[t[0]][t[1]].slots[t[2]].f=d.it;G[d.r][d.c].slots[d.i].f=null;advance(d.r,d.c);d.it.pop=.5;if(compTri(t[0],t[1]))clearComp(t[0],t[1])}});   // else it springs back
-cv.addEventListener('pointercancel',()=>{drag=null});
+cv.addEventListener('pointercancel',()=>{drag=null;UI.press=null});
 // ---- DEBUG: hold Alt + 1 / 2 / 3 ends the game at once with 20 / 12 / 5 boxes. P or Esc = pause.
 addEventListener('keydown',e=>{
- if(e.altKey&&(state=='play'||state=='pause')){const n={Digit1:20,Digit2:12,Digit3:5}[e.code];
-  if(n!=null){e.preventDefault();boxes=n;time=0;queued=0;flyers=[];sel=null;state='over';endT=0;return}}
+ if(e.altKey&&!TUT&&(state=='play'||state=='pause')){const n={Digit1:20,Digit2:12,Digit3:5}[e.code];
+  if(n!=null){e.preventDefault();boxes=n;time=0;queued=0;flyers=[];sel=null;state='over';endT=0;scoreSaved=true;return}}
  if(!e.repeat&&(e.key=='p'||e.key=='P'||e.key=='Escape'))setPause(state=='play')});
 document.addEventListener('visibilitychange',()=>{if(document.hidden)setPause(true)});
 
 
 // ===================== 8. UPDATE =====================
-function update(dt){clock+=dt;if(state=='pause'||state=='homePrompt')return;if(state=='play'&&refreshAnim){updateRefresh(dt);return;}if(state=='over')drag=null;shufCD=Math.max(0,shufCD-dt);
+function update(dt){clock+=dt;if(state=='title'){updateTitle(dt);return}if(state=='option')return;if(state=='pause'||state=='homePrompt'||soundOpen)return;if(TUT)updateTutorial(dt);if(state=='play'&&refreshAnim){updateRefresh(dt);return;}if(state=='over')drag=null;shufCD=Math.max(0,shufCD-dt);
  G.forEach((row,r)=>row.forEach(cp=>{if(cp.door>=0||cp.lock>=0){const op=cp.door>=0?boxes>=DOOR_AT[cp.door]:boxes>=UNLOCK_AT[cp.lock];cp.dop+=((op?1:0)-cp.dop)*Math.min(1,dt*6)}}));
- if(state=='play'){updateCombo(dt);time-=dt;if(time<=0){time=0;state='over';endT=0}}else if(state=='over')endT+=dt;
+ if(state=='play'&&!TUT){updateCombo(dt);time-=dt;if(time<=0){time=0;state='over';endT=0}}else if(state=='over'){endT+=dt;if(!scoreSaved){scoreSaved=true;if(boxes>highScore){highScore=boxes;store.set(BEST_KEY,String(boxes))}}}
  msg.t=Math.max(0,msg.t-dt);
  G.forEach((row,r)=>row.forEach((cp,c)=>cp.slots.forEach((s,i)=>{const k=Math.min(1,dt*14);
   if(s.f&&!(drag&&drag.it===s.f)){s.f.x+=(slotX(c,i)-s.f.x)*k;s.f.y+=(slotY(r)-s.f.y)*k;s.f.pop=Math.max(0,s.f.pop-dt*3)}})));
  flyers.forEach(f=>f.t+=dt/.4);
  flyers=flyers.filter(f=>{if(f.t>=1){if(phase=='idle'&&boxItems.length<3)boxItems.push(f.type);return false}return true});
- if(state!='play')return;checkAutomaticRefresh(dt);if(refreshAnim)return;pt+=dt;happyT=Math.max(0,happyT-dt);
+ if(state!='play')return;if(!TUT)checkAutomaticRefresh(dt);if(refreshAnim)return;pt+=dt;happyT=Math.max(0,happyT-dt);
  if(phase=='idle'){sx=0;ex=0;if(queued>0&&pt>.5){phase='close';pt=0;queued--;boxItems=[lastType,lastType,lastType]}}
  else if(phase=='close'){if(pt>=.6){phase='load';pt=0}}
  else if(phase=='load'){if(pt>=.3){phase='push';pt=0}}
@@ -527,11 +558,12 @@ function drawHUD(){
  ctx.fillStyle=time<15?'#ffaaaa':'#a1d2ff';ctx.fill();
  txt(timeBonusLeft>0?timeBonusText:Math.ceil(time),cx,cy+6,19,timeBonusLeft>0?'#48a875':'#8a6a7c');
  drawRestartButton();
- const [x,y,pr]=PAUSE_BTN;ci(x,y,pr,'#5ba8ef','#2a6fc4',2);
+ drawSoundButton();
+ if(!TUT){const [x,y,pr]=PAUSE_BTN;ci(x,y,pr,'#5ba8ef','#2a6fc4',2);
  rr(x-5,y-6,3,12,1,'#fff');rr(x+2,y-6,3,12,1,'#fff');
- txt('Boxes: '+boxes,W-12,H-9,22,'#8a6a7c','right');
+ txt('Boxes: '+boxes,W-12,H-9,22,'#8a6a7c','right');}
  const nx=[...DOOR_AT,...UNLOCK_AT].filter(u=>u>boxes).sort((a,b)=>a-b)[0];
- if(nx)txt('Next shelf at '+nx+' boxes',W/2,Y0+RH*ROWS+24,12,'#7f9bbf');
+ if(nx&&!TUT)txt('Next shelf at '+nx+' boxes',W/2,Y0+RH*ROWS+24,12,'#7f9bbf');
  if(msg.t>0){ctx.globalAlpha=Math.min(1,msg.t);txt(msg.s,W/2,H/2-40,20,'#2f7fe0');ctx.globalAlpha=1;}
 }
 // Manual refresh cooldown: dark silhouette refills with normal colour from the feet up.
@@ -559,16 +591,218 @@ function drawOver(){ctx.fillStyle='rgba(244,249,255,.93)';ctx.fillRect(0,0,W,H);
  else if(boxes>=HAPPY_STAND){drawSoso(150,505,K,{face:'n',arms:'side'});line='Nice and tidy!'}
  else{const kk=Math.max(0,sn(t*4));drawSoso(150,505,K,{face:'a',arms:'side',kick:kk,prop:()=>boxU('box_closed',315+kk*16,GY-2,null,1)});line='Hmph... restocking is hard.'}
  txt(line,W/2,556,19,'#8a6a7c');if(endT>.8)txt('Tap to play again',W/2,600,21,'#ff6b9a')}
-function drawTitle(){txt("Soso Shelf Stock",W/2,100,34,'#ff6b9a');txt('Drag items into empty spaces.',W/2,142,15);
- txt('Match 3 on a shelf - back rows slide forward!',W/2,166,15);for(let i=0;i<ITEM_TYPES;i++)drawItem(i,48+(i%6)*53,214+Math.floor(i/6)*56,.95);
- drawSoso(W/2,540,.66,{face:'h',arms:'side'});txt('Tap to start',W/2,610,22,'#ff6b9a')}
-function draw(){ctx.setTransform(S,0,0,S,0,0);drawBG();if(state=='title'){drawTitle();return}
- drawShelf();drawSosoScene();drawFlyers();drawHUD();drawDrag();drawRefresh();if(state=='over')drawOver();
+// ===================== 9B. TITLE SCREEN · OPTION SCREEN · SOUND POPUP =====================
+const LOGO=new Image();LOGO.src='asset/ui/logo.png?v=1';
+const MENU_INK='#4a2412';                                  // dark brown for menu outlines + text
+const BTN_W=164,BTN_H=39,BTN_X=(W-BTN_W)/2;
+// Title buttons. They are 50 apart; the slot at y=362 (between Option and Tutorial) is deliberately EMPTY for your next button.
+// To add one: insert {id:'newid',label:'Name',y:362,fill:[...]} below and handle 'newid' in menuActivate().
+const TITLE_BUTTONS=[
+ {id:'start',   label:'Start Game',y:262,fill:['#a6dafc','#79c2f6']},
+ {id:'option',  label:'Option',    y:312,fill:['#cde8fb','#b6dcf8']},
+ {id:'tutorial',label:'Tutorial',  y:412,fill:['#dfeefb','#cce3f7']},
+];
+let highScore=parseInt(store.get(BEST_KEY),10)||0,scoreSaved=false,soundOpen=false;
+const UI={press:null};
+function plain(s,x,y,z,col,al){ctx.save();ctx.font='700 '+z+'px '+F;ctx.textAlign=al||'center';ctx.fillStyle=col||MENU_INK;ctx.fillText(s,x,y);ctx.restore()}
+function menuButton(x,y,w,h,label,fill,pressed,size){
+ const dy=pressed?2:0;
+ if(!pressed)rr(x,y+3,w,h,10,'rgba(74,36,18,.22)');
+ rr(x,y+dy,w,h,10,grad(y,y+h,fill[0],fill[1]),MENU_INK,3);
+ rr(x+8,y+dy+7,5,14,2.5,'rgba(255,255,255,.92)');
+ plain(label,x+w/2,y+dy+h/2+7,size||19);
+}
+// ---- title: Soso pushes a loaded trolley across the floor, on and off the screen, her face flipping happy ↔ neutral
+const TW={x:70,dir:1,wait:0,pass:0,face:'h',faceT:2.4},TW_K=.41,TW_Y=594,TW_SPEED=74;
+function updateTitle(dt){
+ TW.faceT-=dt;if(TW.faceT<=0){TW.face=TW.face==='h'?'n':'h';TW.faceT=1.6+Math.random()*1.9}
+ if(TW.wait>0){TW.wait-=dt;return}
+ TW.x+=TW.dir*TW_SPEED*dt;
+ if(TW.dir>0&&TW.x>425){TW.dir=-1;TW.x=525;TW.pass++;TW.wait=.7}      // off the right edge → come back from the right
+ else if(TW.dir<0&&TW.x<-65){TW.dir=1;TW.x=-165;TW.pass++;TW.wait=.7} // off the left edge → come back from the left
+}
+function drawTitleSoso(){
+ const two=TW.pass%2===1;                                   // alternate one box / two stacked boxes
+ drawSoso(TW.x,TW_Y,TW_K,{face:TW.face,arms:'push',walk:true,ph:clock*13,flip:TW.dir<0,
+  prop:()=>{trolleyU('tr_box',240);if(two)boxU('box_closed',366,206,null,.95)}});
+}
+function drawTitle(){
+ if(LOGO.complete&&LOGO.naturalWidth){const lw=323,lh=lw*LOGO.naturalHeight/LOGO.naturalWidth;ctx.drawImage(LOGO,(W-lw)/2,10+Math.sin(clock*1.7)*1.6,lw,lh)}
+ TITLE_BUTTONS.forEach(b=>menuButton(BTN_X,b.y,BTN_W,BTN_H,b.label,b.fill,UI.press===b.id));
+ drawTitleSoso();
+ plain('Highscore: '+highScore,196,628,17,MENU_INK,'left');
+}
+// ---- option: volume Mute / 1 / 2 / 3
+const OPT_PANEL=[30,120,300,290];
+const OPT_CHIPS=VOLUME_LABELS.map((l,i)=>({id:'vol'+i,x:52+i*66,y:240,w:58,h:44}));
+const OPT_BACK={id:'back',x:BTN_X,y:340,w:BTN_W,h:BTN_H};
+function drawOption(){
+ rr(...OPT_PANEL,22,'rgba(255,255,255,.94)','#a9c9ee',2.5);
+ txt('Option',W/2,172,34,'#ff6b9a');
+ plain('Volume',W/2,222,20,'#3d5a80');
+ OPT_CHIPS.forEach((c,i)=>{const sel=i===volumeLevel;
+  menuButton(c.x,c.y,c.w,c.h,VOLUME_LABELS[i],sel?['#8fcbf8','#5ba8ef']:['#eef6fd','#dcebfa'],UI.press===c.id,i?22:15)});
+ plain('Mute keeps the music running silently.',W/2,312,12,'#7f9bbf');
+ menuButton(OPT_BACK.x,OPT_BACK.y,OPT_BACK.w,OPT_BACK.h,'Back',['#a6dafc','#79c2f6'],UI.press==='back');
+ drawSoso(W/2,596,.5,{face:volumeLevel===0?'n':'h',arms:'side'});
+}
+function menuList(){return state==='title'?TITLE_BUTTONS.map(b=>({id:b.id,x:BTN_X,y:b.y,w:BTN_W,h:BTN_H})):state==='option'?OPT_CHIPS.concat([OPT_BACK]):[]}
+function menuHit(px,py){for(const b of menuList())if(inside(px,py,[b.x,b.y,b.w,b.h]))return b.id;return null}
+function menuActivate(id){
+ if(id==='start')newGame();
+ else if(id==='option')state='option';
+ else if(id==='tutorial')startTutorial();
+ else if(id==='back')state='title';
+ else if(id.startsWith('vol'))setVolumeLevel(+id.slice(3));
+}
+// ---- in-game sound button (top bar) + popup card
+const SOUND_CARD=[104,46,242,52];
+function soundChips(){const[x,y,w]=SOUND_CARD,cw=(w-20-18)/4;return VOLUME_LABELS.map((l,i)=>[x+10+i*(cw+6),y+12,cw,28])}
+function soundPopupTap(px,py){soundChips().forEach((rc,i)=>{if(inside(px,py,rc))setVolumeLevel(i)});soundOpen=false}   // any tap closes it
+function drawSoundButton(){
+ const[x,y,r]=SOUND_BTN;ci(x,y,r,'#5ba8ef','#2a6fc4',2);
+ ctx.fillStyle='#fff';ctx.beginPath();ctx.moveTo(x-7,y-2.6);ctx.lineTo(x-3.5,y-2.6);ctx.lineTo(x+.5,y-6.2);ctx.lineTo(x+.5,y+6.2);ctx.lineTo(x-3.5,y+2.6);ctx.lineTo(x-7,y+2.6);ctx.closePath();ctx.fill();
+ ctx.strokeStyle='#fff';ctx.lineWidth=1.6;ctx.lineCap='round';
+ if(volumeLevel===0){ctx.beginPath();ctx.moveTo(x+4,y-3.6);ctx.lineTo(x+9,y+3.6);ctx.moveTo(x+9,y-3.6);ctx.lineTo(x+4,y+3.6);ctx.stroke()}
+ else for(let k=1;k<=volumeLevel;k++){ctx.beginPath();ctx.arc(x+.5,y,2.2+k*2.1,-.8,.8);ctx.stroke()}
+}
+function drawSoundPopup(){
+ if(!soundOpen)return;
+ ctx.fillStyle='rgba(30,60,110,.2)';ctx.fillRect(0,0,W,H);
+ const[x,y,w,h]=SOUND_CARD,cx=SOUND_BTN[0];
+ rr(x,y,w,h,14,'#fff','#a9c9ee',2);
+ ctx.fillStyle='#fff';ctx.beginPath();ctx.moveTo(cx-8,y+1);ctx.lineTo(cx,y-9);ctx.lineTo(cx+8,y+1);ctx.closePath();ctx.fill();   // caret toward the button
+ ctx.strokeStyle='#a9c9ee';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(cx-8,y+1);ctx.lineTo(cx,y-9);ctx.lineTo(cx+8,y+1);ctx.stroke();
+ soundChips().forEach((rc,i)=>{const sel=i===volumeLevel;
+  rr(rc[0],rc[1],rc[2],rc[3],9,grad(rc[1],rc[1]+rc[3],sel?'#8fcbf8':'#eef6fd',sel?'#5ba8ef':'#dcebfa'),MENU_INK,2.2);
+  plain(VOLUME_LABELS[i],rc[0]+rc[2]/2,rc[1]+rc[3]/2+(i?7:5),i?19:13)});
+}
+function draw(){ctx.setTransform(S,0,0,S,0,0);drawBG();
+ if(state=='title'){drawTitle();return}
+ if(state=='option'){drawOption();return}
+ drawShelf();drawSosoScene();drawFlyers();drawHUD();
+ if(TUT){drawTutorialDim();drawTutorialHints()}
+ drawDrag();drawRefresh();
+ if(TUT)drawTutorialBubble();
+ if(state=='over')drawOver();
  if(state==='pause')drawPauseScreen();
  if(state==='homePrompt')drawHomePrompt();
+ drawSoundPopup();
+}
+
+// ===================== 9C. TUTORIAL =====================
+// A guided mini-round on the real game engine: scripted board, frozen timer, one lesson per step.
+let TUT=null;
+const IT={peach:0,milk:1,flash:2,fan:3,jam:4,chips:5,noodle:6,bread:7,tuna:8,tin:9,shampoo:10,straw:11};   // = ITEM_PATHS order
+const BUB=[112,526,240,104],BUB_NEXT=[BUB[0]+BUB[2]-76,BUB[1]+BUB[3]-32,64,24],BUB_SKIP=[BUB[0]+12,BUB[1]+BUB[3]-32,50,24];
+const TUT_SOSO=[8,524,108,108];
+const TUT_STEPS=[
+ {text:"Hi, I'm Soso! Let's learn how to sort the shelves together.",next:true},
+ {text:'Drag the milk into the glowing slot to line up 3 milks. Items can only go into empty spaces.'},
+ {text:'Three of a kind gets packed into a box! New stock slides forward once a shelf is empty.',next:true},
+ {text:'Your turn! Drag 3 strawberry milks onto one shelf.'},
+ {text:()=>'Every box opens more room: cabinets at '+DOOR_AT.join(' & ')+' boxes, locked shelves from '+UNLOCK_AT[0]+'.',next:true},
+ {text:'Stuck? Tap me and I will shuffle the front items!'},
+ {text:()=>'Pack '+COMBO_SETTINGS.activationMatches+' sets within '+COMBO_SETTINGS.activationWindow+' seconds to start a combo. Combos add bonus time!',next:true},
+ {text:"You're ready to stock up the store!",next:true,last:true},
+];
+function startTutorial(){
+ resetComboGame();boxes=0;time=GAME_TIME;sel=null;flyers=[];phase='idle';pt=0;sx=0;ex=0;queued=0;boxItems=[];lid=0;msg.t=0;drag=null;shufCD=0;refreshAnim=null;hcur=null;soundOpen=false;
+ buildTutorialBoard();
+ TUT={step:0,t:0,refreshStarted:false};state='play';
+}
+function buildTutorialBoard(){
+ G=[];for(let r=0;r<ROWS;r++){G.push([]);for(let c=0;c<COLS;c++)G[r].push({lock:LOCKED.findIndex(l=>l[0]==r&&l[1]==c),door:DOORS.findIndex(d=>d[0]==r&&d[1]==c),dop:0,slots:[{q:[]},{q:[]},{q:[]}]})}
+ const f=(r,c,i,t)=>{G[r][c].slots[i].f=mk(t,r,c,i)},q=(r,c,i,t)=>G[r][c].slots[i].q.push({t,x:0,y:0,pop:0});
+ // lesson 1: the milk set
+ f(0,1,0,IT.milk);f(0,1,2,IT.milk);q(0,1,0,IT.straw);q(0,1,0,IT.bread);q(0,1,1,IT.peach);q(0,1,2,IT.fan);
+ f(1,1,0,IT.milk);f(1,1,2,IT.peach);
+ // lesson 2: three strawberry milks on three different shelves
+ f(0,2,0,IT.straw);f(1,0,0,IT.straw);f(1,0,1,IT.noodle);f(3,1,1,IT.straw);f(3,1,2,IT.bread);
+ f(2,1,1,IT.tin);                                               // cabinet shelf: only its middle slot is reachable at first
+ // hidden stock behind the locked shelves (keeps refresh and unlocking realistic)
+ [[1,2,[IT.jam,IT.shampoo,IT.tuna],[IT.fan,IT.tin,IT.noodle]],[2,0,[IT.flash,IT.bread,IT.peach],[IT.shampoo,IT.milk,IT.jam]],
+  [2,2,[IT.tuna,IT.flash,IT.fan],[IT.tin,IT.bread,IT.straw]],[3,0,[IT.noodle,IT.peach,IT.jam],[IT.flash,IT.tuna,IT.shampoo]],
+  [3,2,[IT.fan,IT.tin,IT.milk],[IT.peach,IT.noodle,IT.bread]]].forEach(([r,c,fr,bk])=>fr.forEach((t,i)=>{f(r,c,i,t);q(r,c,i,bk[i])}));
+}
+const cellRect=(r,c)=>[X0+c*CWD+3,Y0+r*RH+3,CWD-6,RH-6];
+const slotCentre=(r,c,i)=>[slotX(c,i),slotY(r)-2];
+const TUT_ONE_MOVE={from:[1,1,0],to:[0,1,1]};
+function findHint(){          // best single move toward completing a set
+ let hint=null,top=-1;const fronts=accessibleFront();
+ for(let t=0;t<ITEM_TYPES;t++){
+  const its=fronts.filter(p=>p.it.t===t);if(its.length<3)continue;
+  for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){
+   if(!isOpen(r,c)||[0,1,2].some(i=>blocked(r,c,i)))continue;
+   const sl=G[r][c].slots,same=sl.filter(s=>s.f&&s.f.t===t).length,free=sl.filter(s=>!s.f).length;
+   if(same===3||same+free<3)continue;
+   const src=its.find(p=>!(p.r===r&&p.c===c)),score=same*10+free;
+   if(src&&score>top){top=score;hint={from:[src.r,src.c,src.i],to:[r,c,sl.findIndex(s=>!s.f)]}}
+  }}
+ return hint;
+}
+function tutorialCanDrag(r,c,i){return TUT.step===1?(r===1&&c===1&&i===0):TUT.step===3}
+function tutorialCanDrop(d,t){return TUT.step===1?(t[0]===0&&t[1]===1&&t[2]===1):true}
+function tutorialButtonTap(px,py){
+ if(inside(px,py,BUB_SKIP)){returnToHome();return true}
+ const st=TUT_STEPS[TUT.step];
+ if(st.next&&inside(px,py,BUB_NEXT)){if(st.last)returnToHome();else{TUT.step++;TUT.t=0}return true}
+ return inside(px,py,BUB);
+}
+function updateTutorial(dt){
+ TUT.t+=dt;
+ if(TUT.step===1&&boxes>=1){TUT.step=2;TUT.t=0}
+ else if(TUT.step===3&&boxes>=2){TUT.step=4;TUT.t=0}
+ else if(TUT.step===5&&TUT.refreshStarted&&!refreshAnim){TUT.step=6;TUT.t=0}
+}
+function tutorialFocus(){
+ const s=TUT.step;
+ if(s===1)return[cellRect(0,1),cellRect(1,1)];
+ if(s===2)return[cellRect(0,1)];
+ if(s===4)return[cellRect(1,2),cellRect(0,0)];
+ if(s===6)return[[6,6,204,46]];
+ return[];
+}
+function drawTutorialDim(){
+ const s=TUT.step;if(s===3||s===7)return;
+ const focus=tutorialFocus(),holes=focus.concat([TUT_SOSO]);
+ ctx.save();ctx.beginPath();ctx.rect(0,0,W,H);holes.forEach(hh=>ctx.roundRect(hh[0],hh[1],hh[2],hh[3],10));
+ ctx.fillStyle='rgba(40,70,120,.38)';ctx.fill('evenodd');
+ ctx.strokeStyle='rgba(255,208,64,'+(.55+.45*Math.sin(TUT.t*5))+')';ctx.lineWidth=3;
+ (s===5?[TUT_SOSO]:focus).forEach(hh=>{ctx.beginPath();ctx.roundRect(hh[0],hh[1],hh[2],hh[3],10);ctx.stroke()});
+ ctx.restore();
+}
+function drawHintHand(a,b){
+ const L=2.4,t=(TUT.t%L)/L,m=t<.22?0:t<.72?eio((t-.22)/.5):1,al=t<.08?t/.08:t>.92?(1-t)/.08:1;
+ const x=a[0]+(b[0]-a[0])*m,y=a[1]+(b[1]-a[1])*m,hand=SPR.hr_n;
+ ctx.save();ctx.globalAlpha=al;
+ if(hand.complete&&hand.naturalWidth){const w=30,hh=w*hand.naturalHeight/hand.naturalWidth;ctx.drawImage(hand,x-8,y-6,w,hh)}
+ ctx.restore();
+}
+function drawTutorialHints(){
+ if(drag)return;const s=TUT.step;let mv=null;
+ if(s===1)mv=TUT_ONE_MOVE;else if(s===3)mv=findHint();
+ if(!mv)return;
+ const a=slotCentre(...mv.from),b=slotCentre(...mv.to),pulse=.5+.5*Math.sin(TUT.t*6);
+ ci(b[0],b[1],19+pulse*3,'rgba(255,236,150,.5)','rgba(255,196,48,'+(.6+.4*pulse)+')',2.5);        // glowing target slot
+ drawHintHand(a,b);
+}
+function wrapLines(s,maxW,font){ctx.font=font;const out=[];let cur='';for(const w of s.split(' ')){const t=cur?cur+' '+w:w;if(ctx.measureText(t).width>maxW&&cur){out.push(cur);cur=w}else cur=t}if(cur)out.push(cur);return out}
+function drawTutorialBubble(){
+ const st=TUT_STEPS[TUT.step],text=typeof st.text==='function'?st.text():st.text;
+ ctx.save();
+ poly([[BUB[0]+2,BUB[1]+58],[BUB[0]-10,BUB[1]+70],[BUB[0]+2,BUB[1]+80]],'#fff','#2a6fc4',2.5);
+ rr(...BUB,16,'#fff','#2a6fc4',2.5);
+ ctx.fillStyle='#fff';ctx.fillRect(BUB[0]+.5,BUB[1]+59,4,20);                                    // hide the bubble border behind the tail
+ const lines=wrapLines(text,BUB[2]-28,'700 13px '+F);
+ lines.forEach((ln,i)=>plain(ln,BUB[0]+14,BUB[1]+24+i*16,13,'#3d5a80','left'));
+ menuButton(BUB_SKIP[0],BUB_SKIP[1],BUB_SKIP[2],BUB_SKIP[3],'Skip',['#eef6fd','#dcebfa'],false,12);
+ if(st.next)menuButton(BUB_NEXT[0],BUB_NEXT[1],BUB_NEXT[2],BUB_NEXT[3],st.last?'Finish':'Next',['#a6dafc','#79c2f6'],false,13);
+ plain('Step '+(TUT.step+1)+' / '+TUT_STEPS.length,BUB[0]+BUB[2]/2+4,BUB[1]+BUB[3]-14,10,'#9bb4d4','center');
+ ctx.restore();
 }
 
 // ===================== 10. MAIN LOOP =====================
 let last=performance.now();
-function loop(n){const dt=Math.min(.05,(n-last)/1000);last=n;dtG=dt;update(dt);syncGameplayMusic();draw();requestAnimationFrame(loop)}
+function loop(n){const dt=Math.min(.05,(n-last)/1000);last=n;dtG=dt;update(dt);draw();requestAnimationFrame(loop)}
 requestAnimationFrame(loop);
