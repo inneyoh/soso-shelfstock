@@ -2,14 +2,14 @@
 // ===================== 1. GAME DIFFICULTY — EDIT VALUES HERE =====================
 const GAME_SETTINGS = {
   durationSeconds: 90,             // Initial playtime; combo bonuses can extend it.
-  totalBoxes: 500,                 // 3 items per box: 500 boxes = 1500 stock items.
+  totalBoxes: 700,                 // 3 items per box: 700 boxes = 2100 stock items.
   startingFrontItems: 9,           // Recommended 5–14; keep empty spaces for movement.
-  boxesPerLockedShelf: 5,          // Stock reserved inside each locked shelf.
+  boxesPerLockedShelf: 60,         // Stock rows reserved inside each locked shelf (deep, so unlocked shelves keep refilling).
   cabinetUnlockAt: [2, 4],         // Box scores that open the two half-open cabinets.
   lockedShelfUnlockAt: [6, 8, 10, 12, 14], // Five locked shelves, in order.
   manualRefreshCooldownSeconds: 4,
   minimumRefreshEmptySlots: 4,     // Empty usable front positions retained after any refresh.
-  results: { normalFrom: 40, happyFrom: 80 },
+  results: { normalFrom: 11, happyFrom: 24 },
   combo: {
     activationMatches: 3,          // Number of matches needed to activate combo.
     activationWindow: 10,          // Those matches must fit inside this many seconds.
@@ -120,49 +120,33 @@ function drawSoso(x,y,k,o){o=o||{};const f=o.face||'n',ph=o.ph||0,sn=Math.sin,PI
 // Browsers refuse sound until the player touches the page, so the track is started immediately on load AND retried on the
 // very first tap / click / key press.
 const MUSIC_FILE='asset/audio/stockspree.mp3';            // keep the folder name aligned with GitHub (asset, singular)
-const VOLUME_LEVELS=[0,.25,.5,1];                          // Mute, 1, 2, 3 - edit these numbers (0 silent … 1 full)
-const VOLUME_LABELS=['Mute','1','2','3'];
-const VOLUME_KEY='sosoStockShuffle.volume',BEST_KEY='sosoStockShuffle.best';
+const SOUND_KEY='sosoStockShuffle.sound',BEST_KEY='sosoStockShuffle.best';
 const store={get(k){try{return localStorage.getItem(k)}catch(e){return null}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
-let volumeLevel=2;{const v=parseInt(store.get(VOLUME_KEY),10);if(v>=0&&v<VOLUME_LEVELS.length)volumeLevel=v}
+let soundOn=store.get(SOUND_KEY)!=='off';                  // Sound ON / OFF (saved on the device)
 const gameplayMusic=new Audio(MUSIC_FILE);
-gameplayMusic.loop=true;gameplayMusic.preload='auto';
-// iPhone Safari ignores audio.volume (it always plays at full volume), so there the music goes through Web Audio:
-// the mp3 is decoded once and looped through a gain node whose value is the volume level. Other browsers just use audio.volume.
-const volumeSettable=(()=>{try{if(/[?&]wa=1/.test(location.search))return false;const a=new Audio();a.volume=.5;return a.volume===.5}catch(e){return true}})();
-let audioCtx=null,gainNode=null,musicBuf=null,musicSrc=null,waFailed=false;
-try{if(navigator.audioSession)navigator.audioSession.type='playback'}catch(e){}   // play even when the iPhone silent switch is on
-function setupWebAudio(){
- if(volumeSettable||audioCtx||waFailed)return;
- try{
-  const AC=window.AudioContext||window.webkitAudioContext;audioCtx=new AC();
-  gainNode=audioCtx.createGain();gainNode.gain.value=VOLUME_LEVELS[volumeLevel];gainNode.connect(audioCtx.destination);
-  fetch(MUSIC_FILE).then(r=>r.arrayBuffer()).then(ab=>new Promise((ok,no)=>audioCtx.decodeAudioData(ab,ok,no))).then(b=>{
-   musicBuf=b;musicSrc=audioCtx.createBufferSource();musicSrc.buffer=b;musicSrc.loop=true;musicSrc.connect(gainNode);musicSrc.start(0);
-  }).catch(()=>{waFailed=true;try{audioCtx.close()}catch(e){}audioCtx=null;gainNode=null;startMusic()});   // decode failed → plain audio element
- }catch(e){waFailed=true;audioCtx=null;gainNode=null}
-}
-function applyVolume(){const v=VOLUME_LEVELS[volumeLevel];
- if(volumeSettable||!gainNode)gameplayMusic.volume=v;       // (a failed Web Audio setup falls back to this)
- if(gainNode)gainNode.gain.setTargetAtTime(v,audioCtx.currentTime,.02);}
-function setVolumeLevel(n){volumeLevel=n;store.set(VOLUME_KEY,String(n));applyVolume();}
+gameplayMusic.loop=true;gameplayMusic.preload='auto';gameplayMusic.volume=1;
+// Rules: ON → the track plays from launch (after the first touch if the browser insists) and replays after every result screen.
+//        OFF → the track is stopped and the audio session released, so the phone's own music/podcasts can play over the game.
+//        Result screen → music stops; it comes back on the next touch (the tap that starts the next round).
+let musicWanted=true,musicHeld=false;                      // musicWanted: tab visible · musicHeld: result screen showing
+const shouldPlay=()=>soundOn&&musicWanted&&!musicHeld;
 const UNLOCK_EVENTS=['pointerdown','pointerup','touchend','mouseup','click','keydown'];
-let musicWanted=true;                                      // false only while the browser tab is hidden
 function armUnlock(){UNLOCK_EVENTS.forEach(ev=>addEventListener(ev,unlockMusic,true));}
 function disarmUnlock(){UNLOCK_EVENTS.forEach(ev=>removeEventListener(ev,unlockMusic,true));}
-function unlockMusic(){if(musicWanted)startMusic();}
+function unlockMusic(){startMusic()}
 function startMusic(){
- setupWebAudio();applyVolume();
- if(gainNode){                                             // Web Audio path (iPhone)
-  audioCtx.resume().then(()=>{if(audioCtx.state==='running')disarmUnlock()}).catch(()=>{});
-  return;
- }
+ if(!shouldPlay())return;
+ try{if(navigator.audioSession)navigator.audioSession.type='playback'}catch(e){}   // play even with the iPhone silent switch on
  const p=gameplayMusic.play();
- if(p)p.then(disarmUnlock).catch(armUnlock);               // blocked → try again on the next touch
+ if(p)p.then(disarmUnlock).catch(armUnlock);               // blocked by the browser → retry on the next touch
 }
+function stopMusic(){gameplayMusic.pause();try{if(navigator.audioSession)navigator.audioSession.type='auto'}catch(e){}}
+function setSound(on){soundOn=on;store.set(SOUND_KEY,on?'on':'off');if(on){armUnlock();startMusic()}else stopMusic()}
+function holdMusicForResult(){musicHeld=true;stopMusic()}                    // result screen appears
+function releaseMusicForNewRound(){musicHeld=false;gameplayMusic.currentTime=0;armUnlock();startMusic()}
 armUnlock();startMusic();
 document.addEventListener('visibilitychange',()=>{
- if(document.hidden){musicWanted=false;gameplayMusic.pause();if(audioCtx)audioCtx.suspend().catch(()=>{})}
+ if(document.hidden){musicWanted=false;gameplayMusic.pause()}
  else{musicWanted=true;armUnlock();startMusic()}});
 
 // ===================== 6. GAME STATE =====================
@@ -181,14 +165,15 @@ const mk=(t,r,c,i,dy)=>({t,x:slotX(c,i),y:slotY(r)+(dy||0),pop:0});
 // Choose the next batch ONCE. Rendering and replenishment share this exact plan.
 function getRestockPlan(cp){
  const heads=cp.slots.map(s=>s.q[0]||null),types=heads.map(it=>it?.t);
- if(cp.restockPlan&&heads.every((it,i)=>it===cp.restockHeads[i]&&types[i]===cp.restockTypes[i]))return cp.restockPlan;
- const available=shuf([0,1,2].filter(i=>heads[i]));
+ if(cp.restockPlan&&cp.restockGate===(boxes<(cp.door>=0?DOOR_AT[cp.door]:0)&&cp.door>=0)&&heads.every((it,i)=>it===cp.restockHeads[i]&&types[i]===cp.restockTypes[i]))return cp.restockPlan;
+ const gate=boxes<(cp.door>=0?DOOR_AT[cp.door]:0)&&cp.door>=0;   // closed cabinet: only the middle slot restocks
+ const available=shuf([0,1,2].filter(i=>heads[i]&&!(gate&&i!==1)));
  const roll = Math.random();
- let count = roll < 0.20 ? 1 : roll < 0.45 ? 2 : 3;
+ let count = roll < 0.08 ? 1 : roll < 0.22 ? 2 : 3;      // mostly full rows (fewer gaps)
  count = Math.min(count, available.length);
  // Never preview a batch that would arrive already matched.
- if(count===3&&heads.every(it=>it.t===heads[0].t))count=2;
- cp.restockHeads=heads;cp.restockTypes=types;cp.restockPlan=available.slice(0,count);
+ if(count===3&&heads.every(it=>it&&it.t===heads[0].t))count=2;
+ cp.restockGate=gate;cp.restockHeads=heads;cp.restockTypes=types;cp.restockPlan=available.slice(0,count);
  return cp.restockPlan;
 }
 function advance(r,c){
@@ -205,19 +190,19 @@ function easyCount(){let n=0;for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++)if(is
  if(u.length==3){const f=u.filter(s=>s.f);if(f.length==2&&f[0].f.t==f[1].f.t)n++}}return n}   // shelves one move away from a match
 function deal(){let bad=true,tries=0;while(bad){G=[];
  for(let r=0;r<ROWS;r++){G.push([]);for(let c=0;c<COLS;c++)G[r].push({lock:LOCKED.findIndex(l=>l[0]==r&&l[1]==c),door:DOORS.findIndex(d=>d[0]==r&&d[1]==c),dop:0,slots:[{q:[]},{q:[]},{q:[]}]})}
- const normal=[],locked=[],acc=[];
- for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){const cp=G[r][c];if(cp.lock>=0)locked.push([r,c]);else if(cp.door<0)normal.push([r,c]);
+ const normal=[],locked=[],acc=[],doors=[];
+ for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){const cp=G[r][c];if(cp.lock>=0)locked.push([r,c]);else if(cp.door<0)normal.push([r,c]);else doors.push([r,c]);
   for(let i=0;i<3;i++)if(isOpen(r,c)&&!blocked(r,c,i))acc.push([r,c,i])}
  const openSets=TOTAL_BOXES-locked.length*LOCK_ROWS;
  const ty=[];for(let t=0;t<ITEM_TYPES;t++)ty.push(t);while(ty.length<TOTAL_BOXES)ty.push(rnd(ITEM_TYPES));shuf(ty);
  const A=[];ty.slice(0,openSets).forEach(t=>A.push(t,t,t));shuf(A);               // open shelves: whole sets of 3
  const it=(t)=>({t,x:0,y:0,pop:0});
- const pick=normal.map(([r,c])=>[r,c,rnd(3)]);                                  // every open shelf starts with at least 1 front item
+ const pick=normal.map(([r,c])=>[r,c,rnd(3)]).concat(doors.map(([r,c])=>[r,c,1]));   // cabinets start with their one reachable item                                  // every open shelf starts with at least 1 front item
  const rest=shuf(acc.filter(p=>!pick.some(q=>q[0]==p[0]&&q[1]==p[1]&&q[2]==p[2]))).slice(0,START_FRONTS-pick.length);
  pick.concat(rest).forEach((p,k)=>{G[p[0]][p[1]].slots[p[2]].f=mk(A[k],p[0],p[1],p[2])});
  // Allocate every remaining item exactly once, even when startingFrontItems
  // is not a multiple of three. The final back row may be partial.
- const order=shuf(normal.slice());
+ const order=shuf(normal.concat(doors));                     // cabinets get back rows too (2nd row onwards)
  for(let k=START_FRONTS;k<A.length;k++){
   const offset=k-START_FRONTS,[r,c]=order[Math.floor(offset/3)%order.length];
   G[r][c].slots[offset%3].q.push(it(A[k]));
@@ -228,7 +213,7 @@ function deal(){let bad=true,tries=0;while(bad){G=[];
   rows.forEach((rw,j)=>rw.forEach((t,i)=>{if(j==0)G[r][c].slots[i].f=mk(t,r,c,i);else G[r][c].slots[i].q.push(it(t))}))});
  preventBackTriples();bad=anyTri();for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++)if(rowsTri(G[r][c]))bad=true;
  if(!bad&&tries++<300&&easyCount()<2)bad=true}}
-function newGame(){resetComboGame();boxes=0;time=GAME_TIME;sel=null;flyers=[];phase='idle';pt=0;sx=0;queued=0;boxItems=[];lid=0;msg.t=0;deal();drag=null;shufCD=0;state='play';refreshAnim=null;autoCheckTimer=.25;lastCheckedBoard='';TUT=null;scoreSaved=false;soundOpen=false}
+function newGame(){resetComboGame();boxes=0;time=GAME_TIME;sel=null;flyers=[];phase='idle';pt=0;sx=0;queued=0;boxItems=[];lid=0;msg.t=0;deal();drag=null;shufCD=0;state='play';refreshAnim=null;autoCheckTimer=.25;lastCheckedBoard='';TUT=null;scoreSaved=false;soundOpen=false;releaseMusicForNewRound()}
 
 // ===================== COMBO SETTINGS / STATE =====================
 
@@ -433,7 +418,7 @@ function ensureRefreshSpace(){
  selected.forEach(p=>{p.slot.q.push(p.slot.f);p.slot.f=null;});
 }
 let homePromptPrevious='play';
-const PAUSE_RESUME=[110,548,140,44],HOME_YES=[74,345,94,42],HOME_NO=[192,345,94,42];
+const PAUSE_RESUME=[110,495,140,44],HOME_YES=[74,345,94,42],HOME_NO=[192,345,94,42];
 const pauseSoso=new Image();pauseSoso.src='asset/soso/soso-pause.png';
 const inside=(x,y,b)=>x>=b[0]&&x<=b[0]+b[2]&&y>=b[1]&&y<=b[1]+b[3];
 function openHomePrompt(){homePromptPrevious=state;state='homePrompt';drag=null;}
@@ -445,15 +430,12 @@ function drawRestartButton(){
  ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.beginPath();ctx.arc(rx,ry,6,-.4,Math.PI*1.5);ctx.stroke();
  poly([[rx-2,ry-8],[rx+5,ry-8],[rx+3,ry-2]],'#fff','#fff',1);
 }
-const pauseChips=()=>VOLUME_LABELS.map((l,i)=>[52+i*66,498,58,38]);   // volume buttons on the pause screen
 function drawPauseScreen(){
  ctx.fillStyle='rgba(244,249,255,.95)';ctx.fillRect(0,0,W,H);
  txt('Paused',W/2,166,36,'#ff6b9a');
- if(pauseSoso.complete&&pauseSoso.naturalWidth){const h=262,w=h*pauseSoso.naturalWidth/pauseSoso.naturalHeight;ctx.drawImage(pauseSoso,W/2-w/2,190,w,h);}
- plain('Sound',W/2,486,15,'#3d5a80');
- pauseChips().forEach((rc,i)=>{const sel=i===volumeLevel;rr(rc[0],rc[1],rc[2],rc[3],9,grad(rc[1],rc[1]+rc[3],sel?'#8fcbf8':'#eef6fd',sel?'#5ba8ef':'#dcebfa'),MENU_INK,2.2);plain(VOLUME_LABELS[i],rc[0]+rc[2]/2,rc[1]+rc[3]/2+(i?7:5),i?19:13)});
- rr(...PAUSE_RESUME,22,grad(548,592,'#9fd0ff','#5aa5f0'),'#2a6fc4',3);txt('Resume game',W/2,576,18);
- drawRestartButton();
+ if(pauseSoso.complete&&pauseSoso.naturalWidth){const h=270,w=h*pauseSoso.naturalWidth/pauseSoso.naturalHeight;ctx.drawImage(pauseSoso,W/2-w/2,193,w,h);}
+  rr(...PAUSE_RESUME,22,grad(495,539,'#9fd0ff','#5aa5f0'),'#2a6fc4',3);txt('Resume game',W/2,523,18);
+ drawSoundButton();drawRestartButton();
 }
 function drawConfirmLabel(label,x,y){
  ctx.save();ctx.font='700 20px '+F;ctx.textAlign='center';ctx.lineJoin='round';ctx.lineWidth=3;ctx.strokeStyle=B;ctx.strokeText(label,x,y);ctx.fillStyle='#fff';ctx.fillText(label,x,y);ctx.restore();
@@ -478,11 +460,10 @@ function tap(px,py){
  if(refreshAnim)return true;
  if(state=='title'||state=='option')return true;           // menu screens are handled by pointer press/release (see UI)
  if(state=='over'){if(endT>.8)newGame();return true}
- if(soundOpen){soundPopupTap(px,py);return true}
  if(TUT&&tutorialButtonTap(px,py))return true;
  if(Math.hypot(px-RESTART_BTN[0],py-RESTART_BTN[1])<RESTART_BTN[2]+5){openHomePrompt();return true}
- if(state=='pause'){pauseChips().forEach((rc,i)=>{if(inside(px,py,rc))setVolumeLevel(i)});if(inside(px,py,PAUSE_RESUME))setPause(false);return true}
- if(Math.hypot(px-SOUND_BTN[0],py-SOUND_BTN[1])<SOUND_BTN[2]+6){soundOpen=true;drag=null;return true}
+ if(Math.hypot(px-SOUND_BTN[0],py-SOUND_BTN[1])<SOUND_BTN[2]+6){setSound(!soundOn);return true}   // same button in play and pause
+ if(state=='pause'){if(inside(px,py,PAUSE_RESUME))setPause(false);return true}
  if(!TUT&&Math.hypot(px-PAUSE_BTN[0],py-PAUSE_BTN[1])<PAUSE_BTN[2]+6){setPause(true);return true}
  if(px>=SOSO_X+sx-45&&px<=SOSO_X+sx+80&&py>=GROUND-112&&py<=GROUND+7){
   if(TUT){if(TUT.step===5&&!TUT.refreshStarted){TUT.refreshStarted=true;beginRefresh(false);shufCD=SHUFFLE_CD}return true}
@@ -515,7 +496,7 @@ document.addEventListener('visibilitychange',()=>{if(document.hidden)setPause(tr
 
 
 // ===================== 8. UPDATE =====================
-function update(dt){clock+=dt;if(state=='title'){updateTitle(dt);return}if(state=='option')return;if(state=='pause'||state=='homePrompt'||soundOpen)return;if(TUT)updateTutorial(dt);if(state=='play'&&refreshAnim){updateRefresh(dt);return;}if(state=='over')drag=null;shufCD=Math.max(0,shufCD-dt);
+function update(dt){clock+=dt;if(state=='over'&&!musicHeld)holdMusicForResult();if(state=='title'){updateTitle(dt);return}if(state=='option')return;if(state=='pause'||state=='homePrompt'||soundOpen)return;if(TUT)updateTutorial(dt);if(state=='play'&&refreshAnim){updateRefresh(dt);return;}if(state=='over')drag=null;shufCD=Math.max(0,shufCD-dt);
  G.forEach((row,r)=>row.forEach(cp=>{if(cp.door>=0||cp.lock>=0){const op=cp.door>=0?boxes>=DOOR_AT[cp.door]:boxes>=UNLOCK_AT[cp.lock];cp.dop+=((op?1:0)-cp.dop)*Math.min(1,dt*6)}}));
  if(state=='play'&&!TUT){updateCombo(dt);time-=dt;if(time<=0){time=0;state='over';endT=0}}else if(state=='over'){endT+=dt;if(!scoreSaved){scoreSaved=true;if(boxes>highScore){highScore=boxes;store.set(BEST_KEY,String(boxes))}}}
  msg.t=Math.max(0,msg.t-dt);
@@ -668,17 +649,17 @@ function drawTitle(){
 }
 // ---- option: volume Mute / 1 / 2 / 3
 const OPT_PANEL=[30,120,300,290];
-const OPT_CHIPS=VOLUME_LABELS.map((l,i)=>({id:'vol'+i,x:52+i*66,y:240,w:58,h:44}));
+const OPT_CHIPS=[{id:'son',x:62,y:240,w:110,h:44,label:'ON'},{id:'soff',x:188,y:240,w:110,h:44,label:'OFF'}];
 const OPT_BACK={id:'back',x:BTN_X,y:340,w:BTN_W,h:BTN_H};
 function drawOption(){
  rr(...OPT_PANEL,22,'rgba(255,255,255,.94)','#a9c9ee',2.5);
  txt('Option',W/2,172,34,'#ff6b9a');
- plain('Volume',W/2,222,20,'#3d5a80');
- OPT_CHIPS.forEach((c,i)=>{const sel=i===volumeLevel;
-  menuButton(c.x,c.y,c.w,c.h,VOLUME_LABELS[i],sel?['#8fcbf8','#5ba8ef']:['#eef6fd','#dcebfa'],UI.press===c.id,i?22:15)});
- plain('Mute keeps the music running silently.',W/2,312,12,'#7f9bbf');
+ plain('Sound',W/2,222,20,'#3d5a80');
+ OPT_CHIPS.forEach((c,i)=>{const sel=(i===0)===soundOn;
+  menuButton(c.x,c.y,c.w,c.h,c.label,sel?['#8fcbf8','#5ba8ef']:['#eef6fd','#dcebfa'],UI.press===c.id,22)});
+ plain('OFF stops the music so your own music can play.',W/2,312,12,'#7f9bbf');
  menuButton(OPT_BACK.x,OPT_BACK.y,OPT_BACK.w,OPT_BACK.h,'Back',['#a6dafc','#79c2f6'],UI.press==='back');
- drawSoso(W/2,596,.5,{face:volumeLevel===0?'n':'h',arms:'side'});
+ drawSoso(W/2,596,.5,{face:soundOn?'h':'n',arms:'side'});
 }
 function menuList(){return state==='title'?TITLE_BUTTONS.map(b=>({id:b.id,x:BTN_X,y:b.y,w:BTN_W,h:BTN_H})):state==='option'?OPT_CHIPS.concat([OPT_BACK]):[]}
 function menuHit(px,py){for(const b of menuList())if(inside(px,py,[b.x,b.y,b.w,b.h]))return b.id;return null}
@@ -687,29 +668,16 @@ function menuActivate(id){
  else if(id==='option')state='option';
  else if(id==='tutorial')startTutorial();
  else if(id==='back')state='title';
- else if(id.startsWith('vol'))setVolumeLevel(+id.slice(3));
+ else if(id==='son')setSound(true);
+ else if(id==='soff')setSound(false);
 }
-// ---- in-game sound button (top bar) + popup card
-const SOUND_CARD=[104,46,242,52];
-function soundChips(){const[x,y,w]=SOUND_CARD,cw=(w-20-18)/4;return VOLUME_LABELS.map((l,i)=>[x+10+i*(cw+6),y+12,cw,28])}
-function soundPopupTap(px,py){soundChips().forEach((rc,i)=>{if(inside(px,py,rc))setVolumeLevel(i)});soundOpen=false}   // any tap closes it
+// ---- sound button (top bar in play, beside the restart button on the pause screen): tap = ON / OFF
 function drawSoundButton(){
  const[x,y,r]=SOUND_BTN;ci(x,y,r,'#5ba8ef','#2a6fc4',2);
  ctx.fillStyle='#fff';ctx.beginPath();ctx.moveTo(x-7,y-2.6);ctx.lineTo(x-3.5,y-2.6);ctx.lineTo(x+.5,y-6.2);ctx.lineTo(x+.5,y+6.2);ctx.lineTo(x-3.5,y+2.6);ctx.lineTo(x-7,y+2.6);ctx.closePath();ctx.fill();
  ctx.strokeStyle='#fff';ctx.lineWidth=1.6;ctx.lineCap='round';
- if(volumeLevel===0){ctx.beginPath();ctx.moveTo(x+4,y-3.6);ctx.lineTo(x+9,y+3.6);ctx.moveTo(x+9,y-3.6);ctx.lineTo(x+4,y+3.6);ctx.stroke()}
- else for(let k=1;k<=volumeLevel;k++){ctx.beginPath();ctx.arc(x+.5,y,2.2+k*2.1,-.8,.8);ctx.stroke()}
-}
-function drawSoundPopup(){
- if(!soundOpen)return;
- ctx.fillStyle='rgba(30,60,110,.2)';ctx.fillRect(0,0,W,H);
- const[x,y,w,h]=SOUND_CARD,cx=SOUND_BTN[0];
- rr(x,y,w,h,14,'#fff','#a9c9ee',2);
- ctx.fillStyle='#fff';ctx.beginPath();ctx.moveTo(cx-8,y+1);ctx.lineTo(cx,y-9);ctx.lineTo(cx+8,y+1);ctx.closePath();ctx.fill();   // caret toward the button
- ctx.strokeStyle='#a9c9ee';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(cx-8,y+1);ctx.lineTo(cx,y-9);ctx.lineTo(cx+8,y+1);ctx.stroke();
- soundChips().forEach((rc,i)=>{const sel=i===volumeLevel;
-  rr(rc[0],rc[1],rc[2],rc[3],9,grad(rc[1],rc[1]+rc[3],sel?'#8fcbf8':'#eef6fd',sel?'#5ba8ef':'#dcebfa'),MENU_INK,2.2);
-  plain(VOLUME_LABELS[i],rc[0]+rc[2]/2,rc[1]+rc[3]/2+(i?7:5),i?19:13)});
+ if(!soundOn){ctx.beginPath();ctx.moveTo(x+4,y-3.6);ctx.lineTo(x+9,y+3.6);ctx.moveTo(x+9,y-3.6);ctx.lineTo(x+4,y+3.6);ctx.stroke()}
+ else for(let k=1;k<=2;k++){ctx.beginPath();ctx.arc(x+.5,y,2.2+k*2.6,-.8,.8);ctx.stroke()}
 }
 function draw(){ctx.setTransform(S,0,0,S,0,0);drawBG();
  if(state=='title'){drawTitle();return}
@@ -721,7 +689,6 @@ function draw(){ctx.setTransform(S,0,0,S,0,0);drawBG();
  if(state=='over')drawOver();
  if(state==='pause')drawPauseScreen();
  if(state==='homePrompt')drawHomePrompt();
- drawSoundPopup();
 }
 
 // ===================== 9C. TUTORIAL =====================
