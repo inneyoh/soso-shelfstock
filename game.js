@@ -9,7 +9,7 @@ const GAME_SETTINGS = {
   lockedShelfUnlockAt: [6, 8, 10, 12, 14], // Five locked shelves, in order.
   manualRefreshCooldownSeconds: 4,
   minimumRefreshEmptySlots: 4,     // Empty usable front positions retained after any refresh.
-  results: { normalFrom: 11, happyFrom: 24 },
+  results: { normalFrom: 40, happyFrom: 80 },
   combo: {
     activationMatches: 3,          // Number of matches needed to activate combo.
     activationWindow: 10,          // Those matches must fit inside this many seconds.
@@ -64,17 +64,33 @@ function drawItem(t,x,y,s,a){
 // ===================== 4. SOSO + BOX + TROLLEY ASSETS =====================
 // External image files keep this program readable. Do not rename without changing these keys.
 const SPR_PATHS = ['hr_h', 'fl_h', 'body_a', 'box_open', 'hl_n', 'box_closed', 'tr_empty', 'fr_n', 'tr_box', 'hr_n', 'fr_h', 'fl_n', 'hr_a', 'body_h', 'body_n', 'hl_a', 'hl_h'];
-const SPR={};for(const k of SPR_PATHS){const i=new Image();i.src='asset/soso/'+k+'.webp?v=20261012-soso2';SPR[k]=i}
+const SPR={};for(const k of SPR_PATHS){const i=new Image();i.src='asset/soso/'+k+'.webp?v=20261020-body';SPR[k]=i}
 const img=(n,x,y,w,h)=>{const i=SPR[n];if(i&&i.complete&&i.naturalWidth)ctx.drawImage(i,x,y,w,h)};
 const sz=n=>SPR[n].naturalWidth?[SPR[n].naturalWidth,SPR[n].naturalHeight]:[1,1];
 const cl=x=>Math.max(0,Math.min(1,x)),eio=x=>{x=cl(x);return x*x*(3-2*x)};
 const BS=.61,TS=.95,GY=350;      // box scale, trolley scale, ground line (all in sprite units; Soso's body sprite is 250 wide)
-const HANDS={side:[[83,262],[200,258]],hold:[[112,268],[268,262]],push:[[268,238],[280,250]],up:[[30,146],[220,146]]};
+// Hand targets in body-sprite units (body ~250 wide, centre x=125). Smaller offsets from 125 = hands hug the body.
+const HANDS={side:[[92,262],[190,258]],hold:[[116,268],[252,262]],push:[[246,242],[256,252]],up:[[42,150],[208,150]]};
+const TROLLEY_DX=-22;           // trolley slides in by the same amount so the handle still meets her hands
 let hcur=null,dtG=.016;
 function boxU(name,cx,bot,items,sc){const[w0,h0]=sz(name),w=w0*BS,h=h0*BS;ctx.save();ctx.translate(cx,bot);ctx.scale(sc||1,sc||1);
  if(items)items.forEach((t,i)=>drawItem(t,(i-1)*36,-h*.9,1.25));img(name,-w/2,-h,w,h);ctx.restore()}
-function trolleyU(name,tx){const[w0,h0]=sz(name);img(name,tx,GY-h0*TS,w0*TS,h0*TS)}
+function trolleyU(name,tx){const[w0,h0]=sz(name);img(name,tx+TROLLEY_DX,GY-h0*TS,w0*TS,h0*TS)}
 // o: {face:'n'|'h'|'a', arms:'side'|'hold'|'push'|'up', walk, ph, flip, hop, tilt, tuck, sq, kick, prop:()=>draw between body and hands}
+// Old body art came as two separate parts (head / torso with a transparent gap). Detect that automatically so
+// either art works: returns the row where the head ends, or -1 if the image is one connected piece.
+const splitCache=new Map();
+function splitRow(im){
+ if(splitCache.has(im))return splitCache.get(im);
+ let r=-1;
+ try{const c=document.createElement('canvas'),w=im.naturalWidth,h=im.naturalHeight;c.width=w;c.height=h;const x=c.getContext('2d');x.drawImage(im,0,0);
+  const d=x.getImageData(0,0,w,h).data;
+  for(let y=Math.floor(h*.55);y<Math.floor(h*.8);y++){let solid=0;for(let xx=0;xx<w;xx++)if(d[(y*w+xx)*4+3]>40)solid++;if(solid===0){r=y;break}}
+  if(r<0){ // fallback for the known old art: a thin transparent neck band
+   for(let y=Math.floor(h*.55);y<Math.floor(h*.8);y++){let solid=0;for(let xx=Math.floor(w*.35);xx<Math.floor(w*.65);xx++)if(d[(y*w+xx)*4+3]>40)solid++;if(solid===0){r=y;break}}}
+ }catch(e){r=222}
+ splitCache.set(im,r);return r;
+}
 function drawSoso(x,y,k,o){o=o||{};const f=o.face||'n',ph=o.ph||0,sn=Math.sin,PI=Math.PI,wk=o.walk?1:0,tg=HANDS[o.arms||'side'];
  if(!hcur)hcur=tg.map(p=>p.slice());const a=1-Math.exp(-dtG*16);hcur.forEach((p,i)=>{p[0]+=(tg[i][0]-p[0])*a;p[1]+=(tg[i][1]-p[1])*a});
  const air=-(o.hop||0);ctx.fillStyle='rgba(60,100,150,'+(.2*Math.max(.35,1-air/120))+')';ctx.beginPath();ctx.ellipse(x,y+2,115*k*(1-Math.min(.3,air/260)),20*k,0,0,7);ctx.fill();
@@ -86,11 +102,12 @@ function drawSoso(x,y,k,o){o=o||{};const f=o.face||'n',ph=o.ph||0,sn=Math.sin,PI
  foot(fn.replace('%','r'),172-sn(ph)*12*wk+70*(o.kick||0),324-Math.max(0,-sn(ph))*16*wk-tk-38*(o.kick||0));
  // The body asset contains two separated parts. Keep the torso in place and lower
  // the head by HEAD_DROP sprite pixels so it overlaps the neckline naturally.
- const body=SPR['body_'+f],HEAD_CUT=222,HEAD_DROP=14;
+ const body=SPR['body_'+f],HEAD_DROP=14;
  if(body.complete&&body.naturalWidth){
-  const bw=body.naturalWidth,bh=body.naturalHeight;
-  ctx.drawImage(body,0,HEAD_CUT,bw,bh-HEAD_CUT,0,bob+HEAD_CUT,bw,bh-HEAD_CUT);
-  ctx.drawImage(body,0,0,bw,HEAD_CUT,0,bob+HEAD_DROP,bw,HEAD_CUT);
+  const bw=body.naturalWidth,bh=body.naturalHeight,HEAD_CUT=splitRow(body);
+  if(HEAD_CUT<0)ctx.drawImage(body,0,bob);   // new art: head and body are ONE piece → drawn as-is
+  else{ctx.drawImage(body,0,HEAD_CUT,bw,bh-HEAD_CUT,0,bob+HEAD_CUT,bw,bh-HEAD_CUT);
+  ctx.drawImage(body,0,0,bw,HEAD_CUT,0,bob+HEAD_DROP,bw,HEAD_CUT);}
  }
  if(o.prop)o.prop();
  const hand=(n,p,dy)=>{const[w,h]=sz(n);img(n,p[0]-w/2,p[1]-h/2+bob+dy,w,h)};
@@ -110,15 +127,24 @@ const store={get(k){try{return localStorage.getItem(k)}catch(e){return null}},se
 let volumeLevel=2;{const v=parseInt(store.get(VOLUME_KEY),10);if(v>=0&&v<VOLUME_LEVELS.length)volumeLevel=v}
 const gameplayMusic=new Audio(MUSIC_FILE);
 gameplayMusic.loop=true;gameplayMusic.preload='auto';
-// iPhone Safari ignores audio.volume, so on iOS the level is applied through a Web Audio gain node instead.
-const volumeSettable=(()=>{try{const a=new Audio();a.volume=.5;return a.volume===.5}catch(e){return true}})();
-let audioCtx=null,gainNode=null;
-function connectGain(){
- if(volumeSettable||gainNode)return;
- try{const AC=window.AudioContext||window.webkitAudioContext;audioCtx=new AC();
-  const src=audioCtx.createMediaElementSource(gameplayMusic);gainNode=audioCtx.createGain();src.connect(gainNode);gainNode.connect(audioCtx.destination);}catch(e){gainNode=null}
+// iPhone Safari ignores audio.volume (it always plays at full volume), so there the music goes through Web Audio:
+// the mp3 is decoded once and looped through a gain node whose value is the volume level. Other browsers just use audio.volume.
+const volumeSettable=(()=>{try{if(/[?&]wa=1/.test(location.search))return false;const a=new Audio();a.volume=.5;return a.volume===.5}catch(e){return true}})();
+let audioCtx=null,gainNode=null,musicBuf=null,musicSrc=null,waFailed=false;
+try{if(navigator.audioSession)navigator.audioSession.type='playback'}catch(e){}   // play even when the iPhone silent switch is on
+function setupWebAudio(){
+ if(volumeSettable||audioCtx||waFailed)return;
+ try{
+  const AC=window.AudioContext||window.webkitAudioContext;audioCtx=new AC();
+  gainNode=audioCtx.createGain();gainNode.gain.value=VOLUME_LEVELS[volumeLevel];gainNode.connect(audioCtx.destination);
+  fetch(MUSIC_FILE).then(r=>r.arrayBuffer()).then(ab=>new Promise((ok,no)=>audioCtx.decodeAudioData(ab,ok,no))).then(b=>{
+   musicBuf=b;musicSrc=audioCtx.createBufferSource();musicSrc.buffer=b;musicSrc.loop=true;musicSrc.connect(gainNode);musicSrc.start(0);
+  }).catch(()=>{waFailed=true;try{audioCtx.close()}catch(e){}audioCtx=null;gainNode=null;startMusic()});   // decode failed → plain audio element
+ }catch(e){waFailed=true;audioCtx=null;gainNode=null}
 }
-function applyVolume(){const v=VOLUME_LEVELS[volumeLevel];if(volumeSettable)gameplayMusic.volume=v;else if(gainNode)gainNode.gain.value=v;}
+function applyVolume(){const v=VOLUME_LEVELS[volumeLevel];
+ if(volumeSettable||!gainNode)gameplayMusic.volume=v;       // (a failed Web Audio setup falls back to this)
+ if(gainNode)gainNode.gain.setTargetAtTime(v,audioCtx.currentTime,.02);}
 function setVolumeLevel(n){volumeLevel=n;store.set(VOLUME_KEY,String(n));applyVolume();}
 const UNLOCK_EVENTS=['pointerdown','pointerup','touchend','mouseup','click','keydown'];
 let musicWanted=true;                                      // false only while the browser tab is hidden
@@ -126,13 +152,18 @@ function armUnlock(){UNLOCK_EVENTS.forEach(ev=>addEventListener(ev,unlockMusic,t
 function disarmUnlock(){UNLOCK_EVENTS.forEach(ev=>removeEventListener(ev,unlockMusic,true));}
 function unlockMusic(){if(musicWanted)startMusic();}
 function startMusic(){
- connectGain();applyVolume();
- if(audioCtx&&audioCtx.state==='suspended')audioCtx.resume().catch(()=>{});
+ setupWebAudio();applyVolume();
+ if(gainNode){                                             // Web Audio path (iPhone)
+  audioCtx.resume().then(()=>{if(audioCtx.state==='running')disarmUnlock()}).catch(()=>{});
+  return;
+ }
  const p=gameplayMusic.play();
  if(p)p.then(disarmUnlock).catch(armUnlock);               // blocked → try again on the next touch
 }
-armUnlock();applyVolume();startMusic();
-document.addEventListener('visibilitychange',()=>{if(document.hidden){musicWanted=false;gameplayMusic.pause()}else{musicWanted=true;startMusic()}});
+armUnlock();startMusic();
+document.addEventListener('visibilitychange',()=>{
+ if(document.hidden){musicWanted=false;gameplayMusic.pause();if(audioCtx)audioCtx.suspend().catch(()=>{})}
+ else{musicWanted=true;armUnlock();startMusic()}});
 
 // ===================== 6. GAME STATE =====================
 // G[r][c] = {lock:index|-1, slots:[{f:front item, b:item hidden behind}, x3]}   item = {t,x,y,pop}
@@ -402,7 +433,7 @@ function ensureRefreshSpace(){
  selected.forEach(p=>{p.slot.q.push(p.slot.f);p.slot.f=null;});
 }
 let homePromptPrevious='play';
-const PAUSE_RESUME=[110,495,140,44],HOME_YES=[74,345,94,42],HOME_NO=[192,345,94,42];
+const PAUSE_RESUME=[110,548,140,44],HOME_YES=[74,345,94,42],HOME_NO=[192,345,94,42];
 const pauseSoso=new Image();pauseSoso.src='asset/soso/soso-pause.png';
 const inside=(x,y,b)=>x>=b[0]&&x<=b[0]+b[2]&&y>=b[1]&&y<=b[1]+b[3];
 function openHomePrompt(){homePromptPrevious=state;state='homePrompt';drag=null;}
@@ -414,11 +445,14 @@ function drawRestartButton(){
  ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.beginPath();ctx.arc(rx,ry,6,-.4,Math.PI*1.5);ctx.stroke();
  poly([[rx-2,ry-8],[rx+5,ry-8],[rx+3,ry-2]],'#fff','#fff',1);
 }
+const pauseChips=()=>VOLUME_LABELS.map((l,i)=>[52+i*66,498,58,38]);   // volume buttons on the pause screen
 function drawPauseScreen(){
  ctx.fillStyle='rgba(244,249,255,.95)';ctx.fillRect(0,0,W,H);
  txt('Paused',W/2,166,36,'#ff6b9a');
- if(pauseSoso.complete&&pauseSoso.naturalWidth){const h=270,w=h*pauseSoso.naturalWidth/pauseSoso.naturalHeight;ctx.drawImage(pauseSoso,W/2-w/2,193,w,h);}
- rr(...PAUSE_RESUME,22,grad(495,539,'#9fd0ff','#5aa5f0'),'#2a6fc4',3);txt('Resume game',W/2,523,18);
+ if(pauseSoso.complete&&pauseSoso.naturalWidth){const h=262,w=h*pauseSoso.naturalWidth/pauseSoso.naturalHeight;ctx.drawImage(pauseSoso,W/2-w/2,190,w,h);}
+ plain('Sound',W/2,486,15,'#3d5a80');
+ pauseChips().forEach((rc,i)=>{const sel=i===volumeLevel;rr(rc[0],rc[1],rc[2],rc[3],9,grad(rc[1],rc[1]+rc[3],sel?'#8fcbf8':'#eef6fd',sel?'#5ba8ef':'#dcebfa'),MENU_INK,2.2);plain(VOLUME_LABELS[i],rc[0]+rc[2]/2,rc[1]+rc[3]/2+(i?7:5),i?19:13)});
+ rr(...PAUSE_RESUME,22,grad(548,592,'#9fd0ff','#5aa5f0'),'#2a6fc4',3);txt('Resume game',W/2,576,18);
  drawRestartButton();
 }
 function drawConfirmLabel(label,x,y){
@@ -447,7 +481,7 @@ function tap(px,py){
  if(soundOpen){soundPopupTap(px,py);return true}
  if(TUT&&tutorialButtonTap(px,py))return true;
  if(Math.hypot(px-RESTART_BTN[0],py-RESTART_BTN[1])<RESTART_BTN[2]+5){openHomePrompt();return true}
- if(state=='pause'){if(inside(px,py,PAUSE_RESUME))setPause(false);return true}
+ if(state=='pause'){pauseChips().forEach((rc,i)=>{if(inside(px,py,rc))setVolumeLevel(i)});if(inside(px,py,PAUSE_RESUME))setPause(false);return true}
  if(Math.hypot(px-SOUND_BTN[0],py-SOUND_BTN[1])<SOUND_BTN[2]+6){soundOpen=true;drag=null;return true}
  if(!TUT&&Math.hypot(px-PAUSE_BTN[0],py-PAUSE_BTN[1])<PAUSE_BTN[2]+6){setPause(true);return true}
  if(px>=SOSO_X+sx-45&&px<=SOSO_X+sx+80&&py>=GROUND-112&&py<=GROUND+7){
@@ -624,7 +658,7 @@ function updateTitle(dt){
 function drawTitleSoso(){
  const two=TW.pass%2===1;                                   // alternate one box / two stacked boxes
  drawSoso(TW.x,TW_Y,TW_K,{face:TW.face,arms:'push',walk:true,ph:clock*13,flip:TW.dir<0,
-  prop:()=>{trolleyU('tr_box',240);if(two)boxU('box_closed',366,206,null,.95)}});
+  prop:()=>{trolleyU('tr_box',240);if(two)boxU('box_closed',240+TROLLEY_DX+140,229,null,.95)}});
 }
 function drawTitle(){
  if(LOGO.complete&&LOGO.naturalWidth){const lw=323,lh=lw*LOGO.naturalHeight/LOGO.naturalWidth;ctx.drawImage(LOGO,(W-lw)/2,10+Math.sin(clock*1.7)*1.6,lw,lh)}
