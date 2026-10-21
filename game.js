@@ -2,23 +2,23 @@
 // ===================== 1. GAME DIFFICULTY — EDIT VALUES HERE =====================
 const GAME_SETTINGS = {
   durationSeconds: 90,             // Initial playtime; combo bonuses can extend it.
-  totalBoxes: 700,                 // 3 items per box: 700 boxes = 2100 stock items.
-  startingFrontItems: 9,           // Recommended 5–14; keep empty spaces for movement.
-  boxesPerLockedShelf: 60,         // Stock rows reserved inside each locked shelf (deep, so unlocked shelves keep refilling).
+  totalBoxes: 1000,                 // 3 items per box: 1000 boxes = 3000 stock items.
+  startingFrontItems: 10,           // Recommended 5–14; keep empty spaces for movement.
+  boxesPerLockedShelf: 85,         // Stock rows reserved inside each locked shelf (deep, so unlocked shelves keep refilling).
   cabinetUnlockAt: [2, 4],         // Box scores that open the two half-open cabinets.
   lockedShelfUnlockAt: [6, 8, 10, 12, 14], // Five locked shelves, in order.
   manualRefreshCooldownSeconds: 4,
-  minimumRefreshEmptySlots: 4,     // Empty usable front positions retained after any refresh.
-  results: { normalFrom: 11, happyFrom: 24 },
+  minimumRefreshEmptySlots: 5,     // Empty usable front positions retained after any refresh.
+  results: { normalFrom: 80, happyFrom: 200 },
   combo: {
-    activationMatches: 3,          // Number of matches needed to activate combo.
-    activationWindow: 10,          // Those matches must fit inside this many seconds.
-    startWindow: 15,                // Time to make the next match at 3×.
-    minWindow: 7,                  // Shortest combo countdown.
-    fastAt: 30,                    // Countdown reaches minWindow at this combo.
-    max: 50,                      // Maximum displayed multiplier.
-    bonusAt: 3, bonusSeconds: 4,    // Reward at every new multiple of bonusAt.
-    maxBonusSeconds: 2             // Reward on each match at the maximum combo.
+    activationMatches: 4,          // Number of matches needed to activate combo.
+    activationWindow: 16,          // Those matches must fit inside this many seconds.
+    startWindow: 12,                // Time to make the next match at 3×.
+    minWindow: 5,                  // Shortest combo countdown.
+    fastAt: 40,                    // Countdown reaches minWindow at this combo.
+    max: 100,                      // Maximum displayed multiplier.
+    bonusAt: 5, bonusSeconds: 2,    // Reward at every new multiple of bonusAt.
+    maxBonusSeconds: 3             // Reward on each match at the maximum combo.
   }
 };
 // ===================== 1B. APPEARANCE / FIXED BOARD STRUCTURE =====================
