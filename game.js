@@ -3,22 +3,22 @@
 const GAME_SETTINGS = {
   durationSeconds: 90,             // Initial playtime; combo bonuses can extend it.
   totalBoxes: 1000,                 // 3 items per box: 1000 boxes = 3000 stock items.
-  startingFrontItems: 10,           // Recommended 5–14; keep empty spaces for movement.
+  startingFrontItems: 9,           // Recommended 5–14; keep empty spaces for movement.
   boxesPerLockedShelf: 85,         // Stock rows reserved inside each locked shelf (deep, so unlocked shelves keep refilling).
   cabinetUnlockAt: [2, 4],         // Box scores that open the two half-open cabinets.
   lockedShelfUnlockAt: [6, 8, 10, 12, 14], // Five locked shelves, in order.
   manualRefreshCooldownSeconds: 4,
   minimumRefreshEmptySlots: 5,     // Empty usable front positions retained after any refresh.
-  results: { normalFrom: 80, happyFrom: 200 },
+  results: { normalFrom: 70, happyFrom: 200 },
   combo: {
     activationMatches: 4,          // Number of matches needed to activate combo.
     activationWindow: 16,          // Those matches must fit inside this many seconds.
     startWindow: 12,                // Time to make the next match at 3×.
     minWindow: 5,                  // Shortest combo countdown.
-    fastAt: 40,                    // Countdown reaches minWindow at this combo.
+    fastAt: 50,                    // Countdown reaches minWindow at this combo.
     max: 100,                      // Maximum displayed multiplier.
-    bonusAt: 5, bonusSeconds: 2,    // Reward at every new multiple of bonusAt.
-    maxBonusSeconds: 3             // Reward on each match at the maximum combo.
+    bonusAt: 4, bonusSeconds: 3,    // Reward at every new multiple of bonusAt.
+    maxBonusSeconds: 4             // Reward on each match at the maximum combo.
   }
 };
 // ===================== 1B. APPEARANCE / FIXED BOARD STRUCTURE =====================
