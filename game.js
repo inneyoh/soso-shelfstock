@@ -14,7 +14,7 @@ const GAME_SETTINGS = {
     activationMatches: 4,          // Number of matches needed to activate combo.
     activationWindow: 16,          // Those matches must fit inside this many seconds.
     startWindow: 12,                // Time to make the next match at 3×.
-    minWindow: 6,                  // Shortest combo countdown.
+    minWindow: 5,                  // Shortest combo countdown.
     fastAt: 40,                    // Countdown reaches minWindow at this combo.
     max: 100,                      // Maximum displayed multiplier.
     bonusAt: 5, bonusSeconds: 2,    // Reward at every new multiple of bonusAt.
