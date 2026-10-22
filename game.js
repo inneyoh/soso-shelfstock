@@ -2,6 +2,7 @@
 // ===================== 1. GAME DIFFICULTY — EDIT VALUES HERE =====================
 const GAME_SETTINGS = {
   durationSeconds: 90,             // Initial playtime; combo bonuses can extend it.
+  maxBonusTimePerGame: 300, // NEW: maximum total bonus seconds per game
   totalBoxes: 1000,                 // 3 items per box: 1000 boxes = 3000 stock items.
   startingFrontItems: 9,           // Recommended 5–14; keep empty spaces for movement.
   boxesPerLockedShelf: 60,         // Stock rows reserved inside each locked shelf (deep, so unlocked shelves keep refilling).
@@ -17,8 +18,8 @@ const GAME_SETTINGS = {
     minWindow: 8,                  // Shortest combo countdown.
     fastAt: 50,                    // Countdown reaches minWindow at this combo.
     max: 80,                      // Maximum displayed multiplier.
-    bonusAt: 3, bonusSeconds: 3,    // Reward at every new multiple of bonusAt.
-    maxBonusSeconds: 4             // Reward on each match at the maximum combo.
+    bonusAt: 3, bonusSeconds: 8,    // Reward at every new multiple of bonusAt.
+    maxBonusSeconds: 3             // Reward on each match at the maximum combo.
   }
 };
 // ===================== 1B. APPEARANCE / FIXED BOARD STRUCTURE =====================
@@ -217,24 +218,81 @@ function newGame(){resetComboGame();boxes=0;time=GAME_TIME;sel=null;flyers=[];ph
 
 // ===================== COMBO SETTINGS / STATE =====================
 
-let combo=0,comboLeft=0,comboWindow=COMBO_SETTINGS.startWindow,matchTimes=[],playClock=0,timeBonusLeft=0,timeBonusText='',timerPeak=GAME_TIME;
-function resetCombo(){combo=0;comboLeft=0;comboWindow=COMBO_SETTINGS.startWindow;matchTimes=[];}
-function resetComboGame(){resetCombo();playClock=0;timeBonusLeft=0;timeBonusText='';timerPeak=GAME_TIME;}
+let combo=0,comboLeft=0,comboWindow=COMBO_SETTINGS.startWindow,
+    matchTimes=[],playClock=0,timeBonusLeft=0,
+    timeBonusText='',timerPeak=GAME_TIME;
+
+let bonusTimeEarned = 0;
+
+function resetCombo(){
+  combo=0;
+  comboLeft=0;
+  comboWindow=COMBO_SETTINGS.startWindow;
+  matchTimes=[];
+}
+
+function resetComboGame(){
+  bonusTimeEarned=0;
+  resetCombo();
+  playClock=0;
+  timeBonusLeft=0;
+  timeBonusText='';
+  timerPeak=GAME_TIME;
+}
+
 function comboMatch(){
- const previousCombo=combo;
- if(combo>=COMBO_SETTINGS.activationMatches){combo=Math.min(COMBO_SETTINGS.max,combo+1);}
- else{
-  matchTimes=matchTimes.filter(t=>playClock-t<=COMBO_SETTINGS.activationWindow);matchTimes.push(playClock);
-  if(matchTimes.length>=COMBO_SETTINGS.activationMatches)combo=COMBO_SETTINGS.activationMatches;
- }
- if(combo>=COMBO_SETTINGS.activationMatches){
-  comboWindow=COMBO_SETTINGS.startWindow-(COMBO_SETTINGS.startWindow-COMBO_SETTINGS.minWindow)*cl((combo-COMBO_SETTINGS.activationMatches)/Math.max(1,COMBO_SETTINGS.fastAt-COMBO_SETTINGS.activationMatches));
-  comboLeft=comboWindow;
-  const milestoneBonus=combo>previousCombo&&COMBO_SETTINGS.bonusAt>0&&combo%COMBO_SETTINGS.bonusAt===0?COMBO_SETTINGS.bonusSeconds:0;
-  const capBonus=combo>=COMBO_SETTINGS.max?COMBO_SETTINGS.maxBonusSeconds:0;
-  const bonus=milestoneBonus+capBonus;
-  if(bonus){time+=bonus;timerPeak=Math.max(timerPeak,time);timeBonusText='+'+bonus;timeBonusLeft=.4;}
- }
+  const previousCombo=combo;
+
+  if(combo>=COMBO_SETTINGS.activationMatches){
+    combo=Math.min(COMBO_SETTINGS.max,combo+1);
+  }else{
+    matchTimes=matchTimes.filter(
+      t=>playClock-t<=COMBO_SETTINGS.activationWindow
+    );
+    matchTimes.push(playClock);
+
+    if(matchTimes.length>=COMBO_SETTINGS.activationMatches){
+      combo=COMBO_SETTINGS.activationMatches;
+    }
+  }
+
+  if(combo>=COMBO_SETTINGS.activationMatches){
+    comboWindow=COMBO_SETTINGS.startWindow-
+      (COMBO_SETTINGS.startWindow-COMBO_SETTINGS.minWindow)*
+      cl(
+        (combo-COMBO_SETTINGS.activationMatches)/
+        Math.max(1,COMBO_SETTINGS.fastAt-COMBO_SETTINGS.activationMatches)
+      );
+
+    comboLeft=comboWindow;
+
+    const milestoneBonus=
+      combo>previousCombo &&
+      COMBO_SETTINGS.bonusAt>0 &&
+      combo%COMBO_SETTINGS.bonusAt===0
+        ? COMBO_SETTINGS.bonusSeconds
+        : 0;
+
+    // At maximum combo, use the per-match reward.
+    const requestedBonus=combo>=COMBO_SETTINGS.max
+      ? COMBO_SETTINGS.maxBonusSeconds
+      : milestoneBonus;
+
+    const bonus=Math.min(
+      requestedBonus,
+      Math.max(0,GAME_SETTINGS.maxBonusTimePerGame-bonusTimeEarned)
+    );
+
+    bonusTimeEarned+=bonus;
+
+    if(bonus>0){
+      time+=bonus;
+      timerPeak=Math.max(timerPeak,time);
+      timeBonusText='+'+bonus;
+      timeBonusLeft=.4;
+    }
+  }
+}
 }
 function updateCombo(dt){
  playClock+=dt;timeBonusLeft=Math.max(0,timeBonusLeft-dt);
