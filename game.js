@@ -169,7 +169,7 @@ function getRestockPlan(cp){
  const gate=boxes<(cp.door>=0?DOOR_AT[cp.door]:0)&&cp.door>=0;   // closed cabinet: only the middle slot restocks
  const available=shuf([0,1,2].filter(i=>heads[i]&&!(gate&&i!==1)));
  const roll = Math.random();
- let count = roll < 0.08 ? 1 : roll < 0.22 ? 2 : 3;      // mostly full rows (fewer gaps)
+ let count = roll < 0.25 ? 1 : roll < 0.5 ? 2 : 3;      // mostly full rows (fewer gaps)
  count = Math.min(count, available.length);
  // Never preview a batch that would arrive already matched.
  if(count===3&&heads.every(it=>it&&it.t===heads[0].t))count=2;
