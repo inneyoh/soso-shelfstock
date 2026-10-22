@@ -14,11 +14,11 @@ const GAME_SETTINGS = {
     activationMatches: 3,          // Number of matches needed to activate combo.
     activationWindow: 20,          // Those matches must fit inside this many seconds.
     startWindow: 15,                // Time to make the next match at 3×.
-    minWindow: 5,                  // Shortest combo countdown.
+    minWindow: 6,                  // Shortest combo countdown.
     fastAt: 40,                    // Countdown reaches minWindow at this combo.
     max: 100,                      // Maximum displayed multiplier.
-    bonusAt: 3, bonusSeconds: 2,    // Reward at every new multiple of bonusAt.
-    maxBonusSeconds: 3             // Reward on each match at the maximum combo.
+    bonusAt: 3, bonusSeconds: 3,    // Reward at every new multiple of bonusAt.
+    maxBonusSeconds: 4             // Reward on each match at the maximum combo.
   }
 };
 // ===================== 1B. APPEARANCE / FIXED BOARD STRUCTURE =====================
