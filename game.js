@@ -293,7 +293,6 @@ function comboMatch(){
     }
   }
 }
-}
 function updateCombo(dt){
  playClock+=dt;timeBonusLeft=Math.max(0,timeBonusLeft-dt);
  if(combo>=COMBO_SETTINGS.activationMatches){comboLeft=Math.max(0,comboLeft-dt);if(comboLeft<=0)resetCombo();}
