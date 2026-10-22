@@ -3,7 +3,7 @@
 const GAME_SETTINGS = {
   durationSeconds: 90,             // Initial playtime; combo bonuses can extend it.
   totalBoxes: 1000,                 // 3 items per box: 1000 boxes = 3000 stock items.
-  startingFrontItems: 8,           // Recommended 5–14; keep empty spaces for movement.
+  startingFrontItems: 9,           // Recommended 5–14; keep empty spaces for movement.
   boxesPerLockedShelf: 70,         // Stock rows reserved inside each locked shelf (deep, so unlocked shelves keep refilling).
   cabinetUnlockAt: [2, 4],         // Box scores that open the two half-open cabinets.
   lockedShelfUnlockAt: [6, 8, 10, 12, 14], // Five locked shelves, in order.
@@ -13,7 +13,7 @@ const GAME_SETTINGS = {
   combo: {
     activationMatches: 3,          // Number of matches needed to activate combo.
     activationWindow: 20,          // Those matches must fit inside this many seconds.
-    startWindow: 20,                // Time to make the next match at 3×.
+    startWindow: 18,                // Time to make the next match at 3×.
     minWindow: 7,                  // Shortest combo countdown.
     fastAt: 60,                    // Countdown reaches minWindow at this combo.
     max: 100,                      // Maximum displayed multiplier.
