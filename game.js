@@ -4,18 +4,18 @@ const GAME_SETTINGS = {
   durationSeconds: 90,             // Initial playtime; combo bonuses can extend it.
   totalBoxes: 1000,                 // 3 items per box: 1000 boxes = 3000 stock items.
   startingFrontItems: 9,           // Recommended 5–14; keep empty spaces for movement.
-  boxesPerLockedShelf: 70,         // Stock rows reserved inside each locked shelf (deep, so unlocked shelves keep refilling).
+  boxesPerLockedShelf: 60,         // Stock rows reserved inside each locked shelf (deep, so unlocked shelves keep refilling).
   cabinetUnlockAt: [2, 4],         // Box scores that open the two half-open cabinets.
   lockedShelfUnlockAt: [6, 8, 10, 12, 14], // Five locked shelves, in order.
   manualRefreshCooldownSeconds: 4,
   minimumRefreshEmptySlots: 5,     // Empty usable front positions retained after any refresh.
-  results: { normalFrom: 70, happyFrom: 200 },
+  results: { normalFrom: 60, happyFrom: 150 },
   combo: {
     activationMatches: 3,          // Number of matches needed to activate combo.
     activationWindow: 20,          // Those matches must fit inside this many seconds.
     startWindow: 18,                // Time to make the next match at 3×.
-    minWindow: 7,                  // Shortest combo countdown.
-    fastAt: 60,                    // Countdown reaches minWindow at this combo.
+    minWindow: 8,                  // Shortest combo countdown.
+    fastAt: 50,                    // Countdown reaches minWindow at this combo.
     max: 100,                      // Maximum displayed multiplier.
     bonusAt: 3, bonusSeconds: 3,    // Reward at every new multiple of bonusAt.
     maxBonusSeconds: 4             // Reward on each match at the maximum combo.
@@ -169,7 +169,7 @@ function getRestockPlan(cp){
  const gate=boxes<(cp.door>=0?DOOR_AT[cp.door]:0)&&cp.door>=0;   // closed cabinet: only the middle slot restocks
  const available=shuf([0,1,2].filter(i=>heads[i]&&!(gate&&i!==1)));
  const roll = Math.random();
- let count = roll < 0.25 ? 1 : roll < 0.5 ? 2 : 3;      // mostly full rows (fewer gaps)
+ let count = roll < 0.3 ? 1 : roll < 0.5 ? 2 : 3;      // mostly full rows (fewer gaps)
  count = Math.min(count, available.length);
  // Never preview a batch that would arrive already matched.
  if(count===3&&heads.every(it=>it&&it.t===heads[0].t))count=2;
