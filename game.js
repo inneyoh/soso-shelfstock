@@ -3,7 +3,7 @@
 const GAME_SETTINGS = {
   durationSeconds: 90,             // Initial playtime; combo bonuses can extend it.
   totalBoxes: 1000,                 // 3 items per box: 1000 boxes = 3000 stock items.
-  startingFrontItems: 9,           // Recommended 5–14; keep empty spaces for movement.
+  startingFrontItems: 8,           // Recommended 5–14; keep empty spaces for movement.
   boxesPerLockedShelf: 70,         // Stock rows reserved inside each locked shelf (deep, so unlocked shelves keep refilling).
   cabinetUnlockAt: [2, 4],         // Box scores that open the two half-open cabinets.
   lockedShelfUnlockAt: [6, 8, 10, 12, 14], // Five locked shelves, in order.
