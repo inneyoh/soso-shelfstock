@@ -2,7 +2,7 @@
 // ===================== 1. GAME DIFFICULTY — EDIT VALUES HERE =====================
 const GAME_SETTINGS = {
   durationSeconds: 90,             // Initial playtime; combo bonuses can extend it.
-  maxBonusTimePerGame: 300, // NEW: maximum total bonus seconds per game
+  maxBonusTimePerGame: 420, // NEW: maximum total bonus seconds per game
   totalBoxes: 1000,                 // 3 items per box: 1000 boxes = 3000 stock items.
   startingFrontItems: 9,           // Recommended 5–14; keep empty spaces for movement.
   boxesPerLockedShelf: 60,         // Stock rows reserved inside each locked shelf (deep, so unlocked shelves keep refilling).
@@ -18,7 +18,7 @@ const GAME_SETTINGS = {
     minWindow: 8,                  // Shortest combo countdown.
     fastAt: 50,                    // Countdown reaches minWindow at this combo.
     max: 80,                      // Maximum displayed multiplier.
-    bonusAt: 3, bonusSeconds: 8,    // Reward at every new multiple of bonusAt.
+    bonusAt: 3, bonusSeconds: 7,    // Reward at every new multiple of bonusAt.
     maxBonusSeconds: 3             // Reward on each match at the maximum combo.
   }
 };
