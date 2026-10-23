@@ -10,7 +10,7 @@ const GAME_SETTINGS = {
   lockedShelfUnlockAt: [6, 8, 10, 12, 14], // Five locked shelves, in order.
   manualRefreshCooldownSeconds: 4,
   minimumRefreshEmptySlots: 5,     // Empty usable front positions retained after any refresh.
-  results: { normalFrom: 60, happyFrom: 150 },
+  results: { normalFrom: 80, happyFrom: 220 },
   combo: {
     activationMatches: 3,          // Number of matches needed to activate combo.
     activationWindow: 20,          // Those matches must fit inside this many seconds.
