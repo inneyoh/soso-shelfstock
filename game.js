@@ -2,7 +2,7 @@
 // ===================== 1. GAME DIFFICULTY — EDIT VALUES HERE =====================
 const GAME_SETTINGS = {
   durationSeconds: 90,             // Initial playtime; combo bonuses can extend it.
-  maxBonusTimePerGame: 420, // NEW: maximum total bonus seconds per game
+  maxBonusTimePerGame: 570, // NEW: maximum total bonus seconds per game
   totalBoxes: 1000,                 // 3 items per box: 1000 boxes = 3000 stock items.
   startingFrontItems: 9,           // Recommended 5–14; keep empty spaces for movement.
   boxesPerLockedShelf: 60,         // Stock rows reserved inside each locked shelf (deep, so unlocked shelves keep refilling).
