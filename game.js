@@ -142,7 +142,7 @@ function startMusic(){
  if(p)p.then(disarmUnlock).catch(armUnlock);               // blocked by the browser → retry on the next touch
 }
 function stopMusic(){gameplayMusic.pause();try{if(navigator.audioSession)navigator.audioSession.type='auto'}catch(e){}}
-function setSound(on){soundOn=on;store.set(SOUND_KEY,on?'on':'off');if(on){armUnlock();startMusic()}else stopMusic()}
+function setSound(on){soundOn=on;store.set(SOUND_KEY,on?'on':'off');if(on){armUnlock();startMusic()}else{stopMusic();sfxStopAll()}}
 function holdMusicForResult(){musicHeld=true;stopMusic()}                    // result screen appears
 function releaseMusicForNewRound(){musicHeld=false;gameplayMusic.currentTime=0;armUnlock();startMusic()}
 armUnlock();startMusic();
@@ -196,7 +196,8 @@ function deal(){let bad=true,tries=0;while(bad){G=[];
  for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){const cp=G[r][c];if(cp.lock>=0)locked.push([r,c]);else if(cp.door<0)normal.push([r,c]);else doors.push([r,c]);
   for(let i=0;i<3;i++)if(isOpen(r,c)&&!blocked(r,c,i))acc.push([r,c,i])}
  const openSets=TOTAL_BOXES-locked.length*LOCK_ROWS;
- const ty=[];for(let t=0;t<ITEM_TYPES;t++)ty.push(t);while(ty.length<TOTAL_BOXES)ty.push(rnd(ITEM_TYPES));shuf(ty);
+ const kinds=MP&&VS.types?VS.types:[...Array(ITEM_TYPES).keys()];     // versus uses only VS.types (9 items)
+ const ty=kinds.slice();while(ty.length<TOTAL_BOXES)ty.push(kinds[rnd(kinds.length)]);shuf(ty);
  const A=[];ty.slice(0,openSets).forEach(t=>A.push(t,t,t));shuf(A);               // open shelves: whole sets of 3
  const it=(t)=>({t,x:0,y:0,pop:0});
  const pick=normal.map(([r,c])=>[r,c,rnd(3)]).concat(doors.map(([r,c])=>[r,c,1]));   // cabinets start with their one reachable item                                  // every open shelf starts with at least 1 front item
@@ -332,6 +333,7 @@ function clearComp(r,c){const sl=G[r][c].slots;const pc=combo,mt=sl[0].f.t;boxes
 // Only item TYPES change. Front occupancy, queue depths and item coordinates stay intact.
 let refreshAnim=null,autoCheckTimer=0,lastCheckedBoard='';
 const REFRESH_DURATION=1.85;
+const REFRESH_SETS=1;            // a manual/auto refresh guarantees this many complete sets on the front shelves (was 2)
 const REFRESH_ART={};
 for(const name of ['shutter','pulling-pose']){const image=new Image();image.src='asset/refresh/'+name+'.png';REFRESH_ART[name]=image;}
 function boardFingerprint(){return boxes+'|'+G.flat().map(cp=>cp.slots.map(s=>(s.f?s.f.t:'_')+':'+s.q.map(it=>it.t).join(',')).join('/')).join('|');}
@@ -362,10 +364,10 @@ function shuffleBoard(){
   if(occupied.length===2)pairs.push(occupied);
  }
  let best=original.slice(),bestScore=-1;
- // Construct two front sets, preferring pairs on shelves with one empty position.
+ // Construct the guaranteed front set(s), preferring pairs on shelves with one empty position.
  for(let attempt=0;attempt<100;attempt++){
   const pool=shuf(original.slice()),remaining=counts.slice(),types=[];
-  for(const t of shuf([...Array(ITEM_TYPES).keys()]))while(remaining[t]>=3&&types.length<Math.min(2,Math.floor(fronts.length/3))){types.push(t);remaining[t]-=3;}
+  for(const t of shuf([...Array(ITEM_TYPES).keys()]))while(remaining[t]>=3&&types.length<Math.min(REFRESH_SETS,Math.floor(fronts.length/3))){types.push(t);remaining[t]-=3;}
   const chosen=shuf(pairs.slice()).slice(0,types.length),reserved=new Set(),assign=new Map();
   chosen.forEach((pair,n)=>pair.forEach(p=>{assign.set(p.it,types[n]);reserved.add(p.it);}));
   const spare=shuf(fronts.filter(p=>!reserved.has(p.it)));
@@ -380,9 +382,9 @@ function shuffleBoard(){
    if(index<0)index=0;p.it.t=pool.splice(index,1)[0];
   }
   const fc=Array(ITEM_TYPES).fill(0);fronts.forEach(p=>fc[p.it.t]++);
-  const complete=fc.reduce((n,v)=>n+Math.floor(v/3),0),score=(hasPlayableMatch()?100:0)+Math.min(2,easyCount())*10+Math.min(2,complete);
+  const complete=fc.reduce((n,v)=>n+Math.floor(v/3),0),score=(hasPlayableMatch()?100:0)+Math.min(2,easyCount())*10+Math.min(REFRESH_SETS,complete);
   if(!anyTri()&&score>bestScore){best=entries.map(p=>p.it.t);bestScore=score;}
-  if(bestScore>=122)break;
+  if(bestScore>=100+20+REFRESH_SETS)break;
  }
  entries.forEach((p,i)=>p.it.t=best[i]);preventBackTriples();ensureRefreshSpace();
  lastCheckedBoard=boardFingerprint();autoCheckTimer=.3;
@@ -390,7 +392,7 @@ function shuffleBoard(){
 }
 function beginRefresh(automatic=false){
  if(state!=='play'||refreshAnim)return;
- drag=null;refreshAnim={t:0,changed:false,automatic,startX:sx};shufCD=SHUFFLE_CD;
+ drag=null;refreshAnim={t:0,changed:false,automatic,startX:sx};shufCD=automatic&&MP?SHUFFLE_CD:refreshCD();
 }
 function updateRefresh(dt){
  refreshAnim.t+=dt;
@@ -527,7 +529,7 @@ function tap(px,py){
  if(px>=SOSO_X+sx-45&&px<=SOSO_X+sx+80&&py>=GROUND-112&&py<=GROUND+7){
   if(TUT){if(TUT.step===5&&!TUT.refreshStarted){TUT.refreshStarted=true;beginRefresh(false);shufCD=SHUFFLE_CD}return true}
   if(MP&&MP.ob.brk>0){msg={t:1.2,s:'Soso is on a break!'};return true}
-  if(shufCD<=0){beginRefresh(false);shufCD=SHUFFLE_CD}return true}
+  if(shufCD<=0){beginRefresh(false);shufCD=refreshCD()}return true}
  return false}
 // ---- DRAG AND DROP: items only go into EMPTY slots (no swapping). Dropping on a shelf uses its nearest empty slot.
 const ptr=e=>{const b=cv.getBoundingClientRect();return[(e.clientX-b.left)/b.width*W,(e.clientY-b.top)/b.height*H]};
@@ -541,7 +543,7 @@ cv.addEventListener('pointerdown',e=>{const[px,py]=ptr(e);
  const i=Math.max(0,Math.min(2,Math.floor((px-X0-c*CWD-6)/((CWD-12)/3))));if(blocked(r,c,i))return;const s=G[r][c].slots[i];
  if(TUT&&!tutorialCanDrag(r,c,i))return;
  if(MP){if(mpCellLocked(r,c))return;if(mpCrumbHit(r,c))return;if(s.f&&MP.ob.wind>0&&mpWind(r,c,i))return}
- if(s.f){const hold=MP&&mpSticky(r,c,i)?VS.stickyHold:0;drag={r,c,i,it:s.f,px,py,hold};s.f.pop=.3;if(!hold){s.f.x=px;s.f.y=py-16}try{cv.setPointerCapture(e.pointerId)}catch(_){}}});
+ if(s.f){const hold=MP&&mpSticky(r,c,i)?VS.stickyHold:0;if(hold)sfxPlay('jam');drag={r,c,i,it:s.f,px,py,hold};s.f.pop=.3;if(!hold){s.f.x=px;s.f.y=py-16}try{cv.setPointerCapture(e.pointerId)}catch(_){}}});
 cv.addEventListener('pointermove',e=>{const[px,py]=ptr(e);lastPtr=[px,py];if(!drag)return;drag.px=px;drag.py=py;if(!(drag.hold>0)){drag.it.x=px;drag.it.y=py-16}});
 cv.addEventListener('pointerup',e=>{
  if(UI.press){const[ux,uy]=ptr(e),id=menuHit(ux,uy),was=UI.press;UI.press=null;if(id===was)menuActivate(id);return}
@@ -647,9 +649,11 @@ function drawHUD(){
 // Manual refresh cooldown: dark silhouette refills with normal colour from the feet up.
 function drawSosoScene(){
  if(refreshAnim)return;
- if(MP&&MP.ob.brk>0){ctx.save();ctx.filter='brightness(0.45)';drawSosoSceneArt();ctx.restore();plain('z z Z',SOSO_X+40,GROUND-118+Math.sin(clock*3)*3,18,'#6f87b0');plain(Math.ceil(MP.ob.brk)+'s',SOSO_X,GROUND+16,12,'#6f87b0');return}
+ if(MP&&MP.ob.brk>0){const hh=118,ww=hh*pauseSoso.naturalWidth/pauseSoso.naturalHeight;   // Soso sits on her box with her strawberry milk
+  if(pauseSoso.complete&&pauseSoso.naturalWidth)ctx.drawImage(pauseSoso,SOSO_X+18-ww/2,H-hh-2+Math.sin(clock*3)*1.5,ww,hh);
+  plain('Break  '+Math.ceil(MP.ob.brk)+'s',SOSO_X+18,H-hh-6,12,'#6f87b0');return}
  if(shufCD<=0){drawSosoSceneArt();return;}
- const ready=cl(1-shufCD/SHUFFLE_CD),x=SOSO_X+sx;
+ const ready=cl(1-shufCD/refreshCD()),x=SOSO_X+sx;
  ctx.save();ctx.filter='brightness(0.38)';drawSosoSceneArt();ctx.restore();
  ctx.save();ctx.beginPath();ctx.rect(0,GROUND-112*ready,W,112*ready+10);ctx.clip();drawSosoSceneArt();ctx.restore();
  rr(x-30,GROUND+3,60,5,2,'#788899','#ffffff',1);
@@ -893,14 +897,52 @@ const VS={
   // 2 flashlight=lights out · 3 handheld fan=strong winds · 4 blueberry jam=sticky shelf · 5 potato chips=crumb mess
   // 6 cup noodle=steam fog · 9 cookie tin=shuffle scramble · 11 strawberry milk=Soso break
   sec:{lock:4,dark:6,wind:6,brk:10,sticky:6,fog:5,crumbAuto:8},
+  types:[2,3,4,5,6,8,9,10,11],       // the 9 items stocked in Versus: flashlight, fan, jam, chips, noodle, tuna, tin, shampoo, strawberry milk
+  refreshCD:20,                      // Soso's manual refresh cooldown in Versus (seconds)
+  loserAfter:3, loserSeconds:10, loserPacks:2,   // comeback mode: after being hit 3x in a row without sending one, 2 packs = 1 obstruction for 10 s
   stickyHold:.8,                     // seconds you must hold an item on a jammed slot before it lifts
   stickySlots:2, fogShelves:3, crumbShelves:4,
 };
 const OB_NAME={lock:'LOCKED CABINETS',dark:'LIGHTS OUT',wind:'STRONG WINDS',brk:'SOSO ON BREAK',sticky:'STICKY SHELF',fog:'STEAM FOG',crumb:'CRUMB MESS',scramble:'SHUFFLE SCRAMBLE'};
 const ICE={iceServers:[{urls:'stun:stun.l.google.com:19302'},{urls:'turn:openrelay.metered.ca:80',username:'openrelayproject',credential:'openrelayproject'},{urls:'turn:openrelay.metered.ca:443?transport=tcp',username:'openrelayproject',credential:'openrelayproject'}]};
 let MP_SAVED=null;
+const refreshCD=()=>MP?VS.refreshCD:SHUFFLE_CD;
 const mulberry=a=>()=>{a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296};
 function dealForMode(){if(MP&&MP.seed!=null){RNG=mulberry(MP.seed);try{deal()}finally{RNG=Math.random}}else deal()}
+
+
+// ---- sound effects (asset/audio/sfx/*.mp3) · all follow the Sound ON/OFF setting ----
+const SFX_FILES={light:'light.mp3',lock:'lock.mp3',shield:'shield.mp3',wind:'wind.mp3',strawberrymilk:'strawberrymilk.mp3',jam:'jam.mp3',steam:'steam.mp3',crumbs:'crumbs_last_2_seconds.mp3',fever:'fevertime.mp3'};
+const SFX_DIR='asset/audio/sfx/',CRUMB_TAIL=2;                 // crumbs: only the LAST 2 seconds of the file play
+let sfxCtx=null,sfxMaster=null;const sfxBuf={},sfxLive=new Set();
+function sfxInit(){
+ if(sfxCtx){if(sfxCtx.state!=='running')sfxCtx.resume().catch(()=>{});return}
+ try{const AC=window.AudioContext||window.webkitAudioContext;sfxCtx=new AC();sfxMaster=sfxCtx.createGain();sfxMaster.connect(sfxCtx.destination);
+  sfxCtx.resume().catch(()=>{});
+  Object.entries(SFX_FILES).forEach(([k,f])=>fetch(SFX_DIR+f+'?v=1').then(r=>r.arrayBuffer()).then(ab=>new Promise((ok,no)=>sfxCtx.decodeAudioData(ab,ok,no))).then(b=>{sfxBuf[k]=b}).catch(()=>{}));
+ }catch(e){sfxCtx=null}
+}
+['pointerup','touchend','click','keydown'].forEach(ev=>addEventListener(ev,sfxInit,true));
+function sfxPlay(name,o){
+ o=o||{};if(!soundOn||!sfxCtx||!sfxBuf[name])return null;
+ const src=sfxCtx.createBufferSource(),g=sfxCtx.createGain();src.buffer=sfxBuf[name];src.loop=!!o.loop;src.connect(g);g.connect(sfxMaster);
+ src.start(0,o.tail?Math.max(0,src.buffer.duration-o.tail):0);
+ const hd={stop(){if(!sfxLive.has(hd))return;sfxLive.delete(hd);try{const t=sfxCtx.currentTime;g.gain.setTargetAtTime(0,t,.04);src.stop(t+.2)}catch(e){}}};
+ src.onended=()=>sfxLive.delete(hd);sfxLive.add(hd);return hd;
+}
+function sfxStopAll(){[...sfxLive].forEach(x=>x.stop())}
+// Obstruction sound rules: lights out + lock = start AND end · wind + strawberry-milk break = looped for the whole obstruction
+// steam = at start · crumbs = last 2 s of its file at start · jam = each time you try to move an item (see pointerdown)
+function obStart(k){const s=MP.sfx;
+ if(k==='lock')sfxPlay('lock');else if(k==='dark')sfxPlay('light');else if(k==='fog')sfxPlay('steam');else if(k==='crumb')sfxPlay('crumbs',{tail:CRUMB_TAIL});
+ else if(k==='wind'){if(s.wind)s.wind.stop();s.wind=sfxPlay('wind',{loop:true})}
+ else if(k==='brk'){if(s.brk)s.brk.stop();s.brk=sfxPlay('strawberrymilk',{loop:true})}}
+function obEnd(k){const s=MP.sfx;
+ if(k==='lock')sfxPlay('lock');else if(k==='dark')sfxPlay('light');
+ else if(k==='wind'&&s.wind){s.wind.stop();s.wind=null}else if(k==='brk'&&s.brk){s.brk.stop();s.brk=null}}
+function obClearAll(withEndSounds){const o=MP.ob;
+ if(o.lock){o.lock=null;if(withEndSounds)obEnd('lock')}if(o.dark>0){o.dark=0;if(withEndSounds)obEnd('dark')}
+ if(o.wind>0){o.wind=0;obEnd('wind')}if(o.brk>0){o.brk=0;obEnd('brk')}o.sticky=o.fog=null;o.crumb=[]}
 
 // ---- network layer (PeerJS room code · or ?net=local BroadcastChannel for testing on one computer) ----
 const NET={kind:'peer',peer:null,conn:null,bc:null,me:Math.random().toString(36).slice(2),open:false,lastRx:0,hb:0,on:{}};
@@ -992,14 +1034,14 @@ function drawLobby(){
 
 // ---- match state ----
 function mpNew(host){return{host,seed:null,cd:3.2,score:0,x2:0,shield:0,lad:0,packed:[],lastCombo:0,stT:0,
- opp:{score:0,combo:0,shield:0,x2:0},oppFin:null,oppLeft:false,fin:false,waitT:0,leaving:false,
+ sfx:{wind:null,brk:null},hits:0,loser:0,loserN:0,opp:{score:0,combo:0,shield:0,x2:0,lo:0},oppFin:null,oppLeft:false,fin:false,waitT:0,leaving:false,
  ob:{lock:null,sticky:null,fog:null,dark:0,wind:0,brk:0,crumb:[]}}}
 function mpApplySettings(){if(MP_SAVED)return;MP_SAVED={combo:Object.assign({},COMBO_SETTINGS),maxBonus:GAME_SETTINGS.maxBonusTimePerGame};
  Object.assign(COMBO_SETTINGS,VS.combo);GAME_SETTINGS.maxBonusTimePerGame=VS.maxBonus}
 function mpTeardown(){
  if(MP&&MP.fin===false&&state==='play'){}   // (leaving mid-match: opponent is told by the 'bye' sent before this)
  if(MP_SAVED){Object.assign(COMBO_SETTINGS,MP_SAVED.combo);GAME_SETTINGS.maxBonusTimePerGame=MP_SAVED.maxBonus;MP_SAVED=null}
- MP=null;netClose();
+ try{sfxStopAll()}catch(e){}MP=null;netClose();
 }
 function mpStart(host){
  if(host){const seed=1+Math.floor(Math.random()*2e9);netSend({t:'start',seed,ver:VS.ver});mpBegin(true,seed)}
@@ -1013,9 +1055,10 @@ function mpOnMsg(m){
  if(!MP)return;
  if(m.t==='ob')mpApplyOb(m.k,m.n||0);
  else if(m.t==='bonus'){const b=Math.min(m.s,Math.max(0,GAME_SETTINGS.maxBonusTimePerGame-bonusTimeEarned));if(b>0){bonusTimeEarned+=b;time+=b;timerPeak=Math.max(timerPeak,time);timeBonusText='+'+b;timeBonusLeft=.4}}
- else if(m.t==='st'){MP.opp={score:m.s,combo:m.c,shield:m.sh,x2:m.x}}
- else if(m.t==='blocked'){msg={t:1.6,s:'Blocked by their shield!'}}
+ else if(m.t==='st'){MP.opp={score:m.s,combo:m.c,shield:m.sh,x2:m.x,lo:m.lo||0}}
+ else if(m.t==='blocked'){msg={t:1.6,s:'Blocked by their shield!'};sfxPlay('shield')}
  else if(m.t==='fin'){MP.oppFin=m.s}
+ else if(m.t==='lo'){sfxPlay('fever');msg={t:2,s:'OPPONENT COMEBACK!'}}      // shown + heard on both screens
  else if(m.t==='bye')mpOnClose('bye');
 }
 function mpOnClose(why){
@@ -1025,7 +1068,7 @@ function mpOnClose(why){
 }
 function mpTimeUp(left){
  time=0;state='over';endT=0;drag=null;MP.fin=true;MP.waitT=0;
- MP.ob={lock:null,sticky:null,fog:null,dark:0,wind:0,brk:0,crumb:[]};
+ MP.ob={lock:null,sticky:null,fog:null,dark:0,wind:0,brk:0,crumb:[]};sfxStopAll();
  netSend({t:'fin',s:MP.score});
 }
 const mpReady=()=>MP.oppFin!=null||MP.oppLeft||MP.waitT>6;
@@ -1043,10 +1086,13 @@ function mpPickKind(){
 function mpOnMatch(pc,t){
  MP.score+=MP.x2>0?2:1;MP.packed.push(t);
  // COUNTER: completing a set while an obstruction is active ends it early
- if(mpActive()){const o=MP.ob;o.lock=o.sticky=o.fog=null;o.dark=o.wind=o.brk=0;o.crumb=[];msg={t:1.4,s:'Counter!'}}
+ if(mpActive()){obClearAll(true);msg={t:1.4,s:'Counter!'}}
  const lp=MP.lad;MP.lad=combo<COMBO_SETTINGS.activationMatches?0:pc>=COMBO_SETTINGS.activationMatches?lp+1:combo;
  const cross=n=>n>0&&Math.floor(MP.lad/n)>Math.floor(lp/n);
- if(cross(VS.obstructEvery)){const k=mpPickKind(),n=k==='lock'?lockCountFor(combo):0;MP.packed=[];netSend({t:'ob',k,n});msg={t:1.6,s:'Sent: '+OB_NAME[k]+'!'}}
+ const sendOb=()=>{const k=mpPickKind(),n=k==='lock'?lockCountFor(combo):0;MP.packed=[];MP.hits=0;netSend({t:'ob',k,n});msg={t:1.6,s:'Sent: '+OB_NAME[k]+'!'}};
+ let sent=false;
+ if(MP.loser>0&&++MP.loserN>=VS.loserPacks){MP.loserN=0;sendOb();sent=true}      // COMEBACK MODE: every 2 packs sends an obstruction
+ if(!sent&&cross(VS.obstructEvery))sendOb();
  if(cross(VS.x2Every)){MP.x2=VS.x2Seconds;msg={t:1.6,s:'x2 SCORE!'}}
  if(cross(VS.shieldEvery)&&MP.shield<VS.shieldMax){MP.shield++;msg={t:1.6,s:'Shield ready!'}}
 }
@@ -1059,6 +1105,7 @@ function mpApplyOb(kind,n){
  const o=MP.ob;
  if(MP.shield>0){MP.shield--;netSend({t:'blocked',k:kind});msg={t:1.8,s:'Shield blocked '+OB_NAME[kind]+'!'};return}
  msg={t:1.4,s:OB_NAME[kind]+'!'};
+ if(++MP.hits>=VS.loserAfter&&MP.loser<=0){MP.loser=VS.loserSeconds;MP.loserN=0;MP.hits=0;sfxPlay('fever');netSend({t:'lo'});setTimeout(()=>{if(MP)msg={t:2,s:'COMEBACK MODE!'}},900)}
  if(kind==='lock')o.lock={t:VS.sec.lock,cells:pickCells(Math.max(1,n))};
  else if(kind==='dark')o.dark=VS.sec.dark;
  else if(kind==='wind')o.wind=VS.sec.wind;
@@ -1068,6 +1115,7 @@ function mpApplyOb(kind,n){
  else if(kind==='sticky'){const sl=[];openCells().forEach(([r,c])=>{for(let i=0;i<3;i++)if(!blocked(r,c,i))sl.push([r,c,i,G[r][c].slots[i].f?0:1])});
   sl.sort((a,b)=>a[3]-b[3]+(Math.random()-.5)*1.5);o.sticky={t:VS.sec.sticky,slots:sl.slice(0,VS.stickySlots)}}
  else if(kind==='scramble')mpScramble();
+ obStart(kind);
 }
 function mpScramble(){
  drag=null;const spots=[];
@@ -1095,14 +1143,16 @@ function mpWind(r,c,i){
 // ---- per-frame ----
 function mpUpdate(dt){
  const o=MP.ob;
- if(o.lock&&(o.lock.t-=dt)<=0)o.lock=null;
+ if(o.lock&&(o.lock.t-=dt)<=0){o.lock=null;obEnd('lock')}
  if(o.sticky&&(o.sticky.t-=dt)<=0)o.sticky=null;
  if(o.fog&&(o.fog.t-=dt)<=0)o.fog=null;
- o.dark=Math.max(0,o.dark-dt);o.wind=Math.max(0,o.wind-dt);o.brk=Math.max(0,o.brk-dt);MP.x2=Math.max(0,MP.x2-dt);
+ {const d0=o.dark>0,w0=o.wind>0,b0=o.brk>0;o.dark=Math.max(0,o.dark-dt);o.wind=Math.max(0,o.wind-dt);o.brk=Math.max(0,o.brk-dt);
+  if(d0&&!o.dark)obEnd('dark');if(w0&&!o.wind)obEnd('wind');if(b0&&!o.brk)obEnd('brk')}
+ MP.x2=Math.max(0,MP.x2-dt);MP.loser=Math.max(0,MP.loser-dt);if(!MP.loser)MP.loserN=0;
  o.crumb.forEach(q=>q.t-=dt);o.crumb=o.crumb.filter(q=>q.t>0);
  if(combo===0&&MP.lastCombo>0){MP.lad=0;MP.packed=[]}MP.lastCombo=combo;
  if(drag&&drag.hold>0){drag.hold-=dt;if(drag.hold<=0){drag.it.x=drag.px;drag.it.y=drag.py-16}}
- if((MP.stT-=dt)<=0){MP.stT=.4;netSend({t:'st',s:MP.score,c:combo,sh:MP.shield,x:Math.ceil(MP.x2)})}
+ if((MP.stT-=dt)<=0){MP.stT=.4;netSend({t:'st',s:MP.score,c:combo,sh:MP.shield,x:Math.ceil(MP.x2),lo:Math.ceil(MP.loser)})}
 }
 
 // ---- drawing ----
@@ -1135,11 +1185,12 @@ function drawVsDark(){
 function drawVsHUD(){
  const o=MP.ob;
  txt('You  '+MP.score,W-12,H-34,22,'#2a6fc4','right');
- plain('Opp  '+MP.opp.score+'  ·  combo '+MP.opp.combo,W-12,H-12,13,'#8a6a7c','right');
+ plain('Opp  '+MP.opp.score+'  ·  combo '+MP.opp.combo+(MP.opp.lo>0?'  ·  comeback!':''),W-12,H-12,13,'#8a6a7c','right');
  let cx=W-12;
  const chip=(label,fill,stroke)=>{ctx.font='700 12px '+F;const w=ctx.measureText(label).width+16;rr(cx-w,H-82,w,20,10,fill,stroke,1.6);plain(label,cx-w/2,H-68,12,stroke);cx-=w+6};
  if(MP.x2>0)chip('x2  '+Math.ceil(MP.x2)+'s','#fff2b8','#c08a10');
  if(MP.shield>0)chip('SHIELD','#d8ecff','#2a6fc4');
+ if(MP.loser>0)chip('COMEBACK  '+Math.ceil(MP.loser)+'s','#ffe0c4','#d0661a');
  // banner for the obstruction currently on you
  const act=[];if(o.lock)act.push(['lock',o.lock.t]);if(o.dark>0)act.push(['dark',o.dark]);if(o.wind>0)act.push(['wind',o.wind]);if(o.brk>0)act.push(['brk',o.brk]);
  if(o.sticky)act.push(['sticky',o.sticky.t]);if(o.fog)act.push(['fog',o.fog.t]);if(o.crumb.length)act.push(['crumb',o.crumb[0].t]);
