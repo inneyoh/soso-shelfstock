@@ -125,8 +125,14 @@ const MUSIC_VS='asset/audio/stockshufflers.mp3';           // Versus-mode BGM
 const SOUND_KEY='sosoStockShuffle.sound',BEST_KEY='sosoStockShuffle.best';
 const store={get(k){try{return localStorage.getItem(k)}catch(e){return null}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
 let soundOn=store.get(SOUND_KEY)!=='off';                  // Sound ON / OFF (saved on the device)
-const gameplayMusic=new Audio(MUSIC_FILE);
-gameplayMusic.loop=true;gameplayMusic.preload='auto';gameplayMusic.volume=1;
+const normalMusic=new Audio(MUSIC_FILE),versusMusic=new Audio(MUSIC_VS);
+[normalMusic,versusMusic].forEach(a=>{a.loop=true;a.preload='auto';a.volume=1});
+let gameplayMusic=normalMusic;                             // the track currently in use (Versus swaps it)
+let vsPrimed=false;
+function primeVersus(){                                    // unlock the Versus track during a real tap so it can start later without one
+ if(vsPrimed)return;vsPrimed=true;
+ try{versusMusic.muted=true;const p=versusMusic.play();const done=()=>{if(gameplayMusic!==versusMusic)versusMusic.pause();versusMusic.currentTime=0;versusMusic.muted=false};if(p)p.then(done).catch(()=>{vsPrimed=false;versusMusic.muted=false});else done()}catch(e){vsPrimed=false}
+}
 // Rules: ON → the track plays from launch (after the first touch if the browser insists) and replays after every result screen.
 //        OFF → the track is stopped and the audio session released, so the phone's own music/podcasts can play over the game.
 //        Result screen → music stops; it comes back on the next touch (the tap that starts the next round).
@@ -135,7 +141,7 @@ const shouldPlay=()=>soundOn&&musicWanted&&!musicHeld;
 const UNLOCK_EVENTS=['pointerdown','pointerup','touchend','mouseup','click','keydown'];
 function armUnlock(){UNLOCK_EVENTS.forEach(ev=>addEventListener(ev,unlockMusic,true));}
 function disarmUnlock(){UNLOCK_EVENTS.forEach(ev=>removeEventListener(ev,unlockMusic,true));}
-function unlockMusic(){startMusic()}
+function unlockMusic(){startMusic();primeVersus()}
 function startMusic(){
  if(!shouldPlay())return;
  try{if(navigator.audioSession)navigator.audioSession.type='playback'}catch(e){}   // play even with the iPhone silent switch on
@@ -145,8 +151,9 @@ function startMusic(){
 function stopMusic(){gameplayMusic.pause();try{if(navigator.audioSession)navigator.audioSession.type='auto'}catch(e){}}
 function setSound(on){soundOn=on;store.set(SOUND_KEY,on?'on':'off');if(on){armUnlock();startMusic()}else{stopMusic();sfxStopAll()}}
 function setTrack(file){                                  // swap BGM (Versus uses its own track)
- if(gameplayMusic.getAttribute('src')===file)return;
- gameplayMusic.pause();gameplayMusic.src=file;gameplayMusic.loop=true;gameplayMusic.currentTime=0;
+ const next=file===MUSIC_VS?versusMusic:normalMusic;
+ if(next===gameplayMusic)return;
+ gameplayMusic.pause();gameplayMusic=next;gameplayMusic.currentTime=0;
  if(shouldPlay()){armUnlock();startMusic()}
 }
 function holdMusicForResult(){musicHeld=true;stopMusic()}                    // result screen appears
@@ -924,11 +931,13 @@ function dealForMode(){if(MP&&MP.seed!=null){RNG=mulberry(MP.seed);try{deal()}fi
 // ---- sound effects (asset/audio/sfx/*.mp3) · all follow the Sound ON/OFF setting ----
 const SFX_FILES={light:'light.mp3',lock:'lock.mp3',shield:'shield.mp3',wind:'wind.mp3',strawberrymilk:'strawberrymilk.mp3',jam:'jam.mp3',steam:'steam.mp3',crumbs:'crumbs_last_2_seconds.mp3',fever:'fevertime.mp3',shuffle:'shuffle.mp3'};
 const SFX_DIRS=['audio/','asset/audio/sfx/'],CRUMB_TAIL=2;   // looks in /audio/ first (where your files are), then asset/audio/sfx/                 // crumbs: only the LAST 2 seconds of the file play
+// ---- SFX VOLUME: change SFX_VOLUME (1 = full, 0.5 = half, 0.3 = quiet). SFX_GAIN lets you set single sounds, e.g. wind:0.4 ----
+const SFX_VOLUME=0.6,SFX_GAIN={light:1,lock:1,shield:1,wind:1,strawberrymilk:1,jam:1,steam:1,crumbs:1,fever:1,shuffle:1};
 let sfxCtx=null,sfxMaster=null;const sfxBuf={},sfxLive=new Set();
 function sfxFetch(f,i=0){return fetch(SFX_DIRS[i]+f+'?v=2').then(r=>{if(!r.ok)throw 0;return r}).catch(e=>i+1<SFX_DIRS.length?sfxFetch(f,i+1):Promise.reject(e))}
 function sfxInit(){
  if(sfxCtx){if(sfxCtx.state!=='running')sfxCtx.resume().catch(()=>{});return}
- try{const AC=window.AudioContext||window.webkitAudioContext;sfxCtx=new AC();sfxMaster=sfxCtx.createGain();sfxMaster.connect(sfxCtx.destination);
+ try{const AC=window.AudioContext||window.webkitAudioContext;sfxCtx=new AC();sfxMaster=sfxCtx.createGain();sfxMaster.gain.value=SFX_VOLUME;sfxMaster.connect(sfxCtx.destination);
   sfxCtx.resume().catch(()=>{});
   Object.entries(SFX_FILES).forEach(([k,f])=>sfxFetch(f).then(r=>r.arrayBuffer()).then(ab=>new Promise((ok,no)=>sfxCtx.decodeAudioData(ab,ok,no))).then(b=>{sfxBuf[k]=b}).catch(()=>{}));
  }catch(e){sfxCtx=null}
@@ -936,7 +945,7 @@ function sfxInit(){
 ['pointerup','touchend','click','keydown'].forEach(ev=>addEventListener(ev,sfxInit,true));
 function sfxPlay(name,o){
  o=o||{};if(!soundOn||!sfxCtx||!sfxBuf[name])return null;
- const src=sfxCtx.createBufferSource(),g=sfxCtx.createGain();src.buffer=sfxBuf[name];src.loop=!!o.loop;src.connect(g);g.connect(sfxMaster);
+ const src=sfxCtx.createBufferSource(),g=sfxCtx.createGain();g.gain.value=SFX_GAIN[name]??1;src.buffer=sfxBuf[name];src.loop=!!o.loop;src.connect(g);g.connect(sfxMaster);
  src.start(0,o.tail?Math.max(0,src.buffer.duration-o.tail):0);
  const hd={stop(){if(!sfxLive.has(hd))return;sfxLive.delete(hd);try{const t=sfxCtx.currentTime;g.gain.setTargetAtTime(0,t,.04);src.stop(t+.2)}catch(e){}}};
  src.onended=()=>sfxLive.delete(hd);sfxLive.add(hd);return hd;
