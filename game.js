@@ -120,13 +120,18 @@ function drawSoso(x,y,k,o){o=o||{};const f=o.face||'n',ph=o.ph||0,sn=Math.sin,PI
 // the game (new game, pause, home, mute…). "Mute" only turns the volume to 0 - the track keeps running underneath.
 // Browsers refuse sound until the player touches the page, so the track is started immediately on load AND retried on the
 // very first tap / click / key press.
-const MUSIC_FILE='asset/audio/stockspree.mp3';            // keep the folder name aligned with GitHub (asset, singular)
-const MUSIC_VS='asset/audio/stockshufflers.mp3';           // Versus-mode BGM
+const MUSIC_FILE='asset/audio/stockspree.mp3';           // BGM folder: asset/audio
+const MUSIC_VS_LIST=['asset/audio/stockshufflers.mp3'],MUSIC_VS=MUSIC_VS_LIST[0];   // Versus BGM: asset/audio           // Versus-mode BGM
 const SOUND_KEY='sosoStockShuffle.sound',BEST_KEY='sosoStockShuffle.best';
 const store={get(k){try{return localStorage.getItem(k)}catch(e){return null}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
 let soundOn=store.get(SOUND_KEY)!=='off';                  // Sound ON / OFF (saved on the device)
 const normalMusic=new Audio(MUSIC_FILE),versusMusic=new Audio(MUSIC_VS);
 [normalMusic,versusMusic].forEach(a=>{a.loop=true;a.preload='auto';a.volume=1});
+let vsTry=0;
+versusMusic.addEventListener('error',()=>{                 // file not found → try the next folder, finally fall back to the normal track
+ if(++vsTry<MUSIC_VS_LIST.length){versusMusic.src=MUSIC_VS_LIST[vsTry];versusMusic.load();if(gameplayMusic===versusMusic&&shouldPlay())startMusic()}
+ else if(gameplayMusic===versusMusic){gameplayMusic=normalMusic;if(shouldPlay())startMusic()}
+});
 let gameplayMusic=normalMusic;                             // the track currently in use (Versus swaps it)
 let vsPrimed=false;
 function primeVersus(){                                    // unlock the Versus track during a real tap so it can start later without one
@@ -930,12 +935,13 @@ function dealForMode(){if(MP&&MP.seed!=null){RNG=mulberry(MP.seed);try{deal()}fi
 
 // ---- sound effects (asset/audio/sfx/*.mp3) · all follow the Sound ON/OFF setting ----
 const SFX_FILES={light:'light.mp3',lock:'lock.mp3',shield:'shield.mp3',wind:'wind.mp3',strawberrymilk:'strawberrymilk.mp3',jam:'jam.mp3',steam:'steam.mp3',crumbs:'crumbs_last_2_seconds.mp3',fever:'fevertime.mp3',shuffle:'shuffle.mp3'};
-const SFX_DIRS=['audio/','asset/audio/sfx/'],CRUMB_TAIL=2;   // looks in /audio/ first (where your files are), then asset/audio/sfx/                 // crumbs: only the LAST 2 seconds of the file play
+const SFX_DIRS=['asset/audio/sfx/'],CRUMB_TAIL=2;   // SFX folder: asset/audio/sfx/                 // crumbs: only the LAST 2 seconds of the file play
 // ---- SFX VOLUME: change SFX_VOLUME (1 = full, 0.5 = half, 0.3 = quiet). SFX_GAIN lets you set single sounds, e.g. wind:0.4 ----
 const SFX_VOLUME=0.6,SFX_GAIN={light:1,lock:1,shield:1,wind:1,strawberrymilk:1,jam:1,steam:1,crumbs:1,fever:1,shuffle:1};
 let sfxCtx=null,sfxMaster=null;const sfxBuf={},sfxLive=new Set();
 function sfxFetch(f,i=0){return fetch(SFX_DIRS[i]+f+'?v=2').then(r=>{if(!r.ok)throw 0;return r}).catch(e=>i+1<SFX_DIRS.length?sfxFetch(f,i+1):Promise.reject(e))}
 function sfxInit(){
+ try{if(navigator.audioSession&&soundOn)navigator.audioSession.type='playback'}catch(e){}   // SFX audible even with the iPhone silent switch on
  if(sfxCtx){if(sfxCtx.state!=='running')sfxCtx.resume().catch(()=>{});return}
  try{const AC=window.AudioContext||window.webkitAudioContext;sfxCtx=new AC();sfxMaster=sfxCtx.createGain();sfxMaster.gain.value=SFX_VOLUME;sfxMaster.connect(sfxCtx.destination);
   sfxCtx.resume().catch(()=>{});
