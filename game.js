@@ -153,9 +153,10 @@ document.addEventListener('visibilitychange',()=>{
 // ===================== 6. GAME STATE =====================
 // G[r][c] = {lock:index|-1, slots:[{f:front item, b:item hidden behind}, x3]}   item = {t,x,y,pop}
 let state='title',time=GAME_TIME,boxes=0,G=[],sel=null,flyers=[],msg={t:0,s:''};
+let MP=null,lastPtr=[180,300];   // MP = versus-mode match state (null in single player)
 let drag=null,shufCD=0;
 let phase='idle',pt=0,sx=0,toff=0,ex=0,happyT=0,queued=0,boxItems=[],lid=0,lastType=0,endT=0,clock=0;
-const rnd=n=>Math.random()*n|0;
+let RNG=Math.random;const rnd=n=>RNG()*n|0;   // RNG is swapped for a seeded generator while the versus board is dealt
 const shuf=a=>{for(let i=a.length-1;i>0;i--){const j=rnd(i+1);[a[i],a[j]]=[a[j],a[i]]}return a};
 const slotX=(c,i)=>X0+c*CWD+20+i*37, slotY=r=>Y0+r*RH+RH-36;
 const blocked=(r,c,i)=>G[r][c].door>=0&&i!=1&&boxes<DOOR_AT[G[r][c].door];
@@ -214,7 +215,7 @@ function deal(){let bad=true,tries=0;while(bad){G=[];
   rows.forEach((rw,j)=>rw.forEach((t,i)=>{if(j==0)G[r][c].slots[i].f=mk(t,r,c,i);else G[r][c].slots[i].q.push(it(t))}))});
  preventBackTriples();bad=anyTri();for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++)if(rowsTri(G[r][c]))bad=true;
  if(!bad&&tries++<300&&easyCount()<2)bad=true}}
-function newGame(){resetComboGame();boxes=0;time=GAME_TIME;sel=null;flyers=[];phase='idle';pt=0;sx=0;queued=0;boxItems=[];lid=0;msg.t=0;deal();drag=null;shufCD=0;state='play';refreshAnim=null;autoCheckTimer=.25;lastCheckedBoard='';TUT=null;scoreSaved=false;soundOpen=false;releaseMusicForNewRound()}
+function newGame(){resetComboGame();boxes=0;time=GAME_TIME;sel=null;flyers=[];phase='idle';pt=0;sx=0;queued=0;boxItems=[];lid=0;msg.t=0;dealForMode();drag=null;shufCD=0;state='play';refreshAnim=null;autoCheckTimer=.25;lastCheckedBoard='';TUT=null;scoreSaved=false;soundOpen=false;releaseMusicForNewRound()}
 
 // ===================== COMBO SETTINGS / STATE =====================
 
@@ -283,7 +284,7 @@ function comboMatch(){
       Math.max(0,GAME_SETTINGS.maxBonusTimePerGame-bonusTimeEarned)
     );
 
-    bonusTimeEarned+=bonus;
+    bonusTimeEarned+=bonus;if(MP&&bonus>0)netSend({t:'bonus',s:bonus});
 
     if(bonus>0){
       time+=bonus;
@@ -323,7 +324,7 @@ function preventPromotedTriple(r,c){
 
 // ===================== 7. MATCH + RESTOCK LOGIC =====================
 // A match is only ever made by the player's own drop, and counts exactly one box.
-function clearComp(r,c){const sl=G[r][c].slots;boxes++;comboMatch();queued++;lastType=sl[0].f.t;
+function clearComp(r,c){const sl=G[r][c].slots;const pc=combo,mt=sl[0].f.t;boxes++;comboMatch();if(MP)mpOnMatch(pc,mt);queued++;lastType=sl[0].f.t;
  sl.forEach(s=>{if(s.f){flyers.push({x:s.f.x,y:s.f.y,t:0,type:s.f.t});s.f=null}});happyT=.9;advance(r,c);
  if(UNLOCK_AT.includes(boxes)||DOOR_AT.includes(boxes))msg={t:1.6,s:'More shelf space!'};
  if(G.every(row=>row.every(cp=>cp.slots.every(s=>!s.f&&!s.q.length)))){state='over';endT=0;drag=null}}   // whole store restocked
@@ -480,7 +481,7 @@ const pauseSoso=new Image();pauseSoso.src='asset/soso/soso-pause.png';
 const inside=(x,y,b)=>x>=b[0]&&x<=b[0]+b[2]&&y>=b[1]&&y<=b[1]+b[3];
 function openHomePrompt(){homePromptPrevious=state;state='homePrompt';drag=null;}
 function returnToHome(){
- state='title';refreshAnim=null;drag=null;G=[];boxes=0;time=GAME_TIME;flyers=[];queued=0;phase='idle';pt=0;sx=0;ex=0;boxItems=[];hcur=null;resetComboGame();TUT=null;soundOpen=false;shufCD=0;refreshAnim=null;
+ mpTeardown();state='title';refreshAnim=null;drag=null;G=[];boxes=0;time=GAME_TIME;flyers=[];queued=0;phase='idle';pt=0;sx=0;ex=0;boxItems=[];hcur=null;resetComboGame();TUT=null;soundOpen=false;shufCD=0;refreshAnim=null;
 }
 function drawRestartButton(){
  const [rx,ry,rad]=RESTART_BTN;ci(rx,ry,rad,'#5ba8ef','#2a6fc4',2);
@@ -500,14 +501,15 @@ function drawConfirmLabel(label,x,y){
 function drawHomePrompt(){
  ctx.fillStyle='rgba(244,249,255,.93)';ctx.fillRect(0,0,W,H);
  rr(35,252,290,160,20,'#fff','#a9c9ee',2);
- txt('Return to Home Screen?',W/2,303,21,'#8a6a7c');
+ txt(MP?'Leave the match?':'Return to Home Screen?',W/2,303,21,'#8a6a7c');
  rr(...HOME_YES,16,'#7fbaef',B,2.5);drawConfirmLabel('Yes',121,372);
  rr(...HOME_NO,16,'#f7b6ce',B,2.5);drawConfirmLabel('No',239,372);
 }
 
 const PAUSE_BTN=[340,24,13],RESTART_BTN=[302,24,13],SOUND_BTN=[264,24,13];
-function setPause(on){if(TUT)return;if(on&&state=='play'){state='pause';drag=null}else if(!on&&state=='pause'){state='play'}}
+function setPause(on){if(TUT||MP)return;if(on&&state=='play'){state='pause';drag=null}else if(!on&&state=='pause'){state='play'}}
 function tap(px,py){
+ if(MP&&MP.leaving){if(inside(px,py,HOME_YES)){mpExit()}else if(inside(px,py,HOME_NO))MP.leaving=false;return true}
  if(state==='homePrompt'){
   if(inside(px,py,HOME_YES))returnToHome();
   else if(inside(px,py,HOME_NO)){state=homePromptPrevious;}
@@ -515,47 +517,50 @@ function tap(px,py){
  }
  // menu buttons; returns true if the touch was used
  if(refreshAnim)return true;
- if(state=='title'||state=='option')return true;           // menu screens are handled by pointer press/release (see UI)
- if(state=='over'){if(endT>.8)newGame();return true}
+ if(state=='title'||state=='option'||state=='lobby')return true;           // menu screens are handled by pointer press/release (see UI)
+ if(state=='over'){if(MP){if(endT>.8&&mpReady())mpExit();return true}if(endT>.8)newGame();return true}
  if(TUT&&tutorialButtonTap(px,py))return true;
- if(Math.hypot(px-RESTART_BTN[0],py-RESTART_BTN[1])<RESTART_BTN[2]+5){openHomePrompt();return true}
+ if(Math.hypot(px-RESTART_BTN[0],py-RESTART_BTN[1])<RESTART_BTN[2]+5){if(MP){MP.leaving=true;drag=null}else openHomePrompt();return true}
  if(Math.hypot(px-SOUND_BTN[0],py-SOUND_BTN[1])<SOUND_BTN[2]+6){setSound(!soundOn);return true}   // same button in play and pause
  if(state=='pause'){if(inside(px,py,PAUSE_RESUME))setPause(false);return true}
- if(!TUT&&Math.hypot(px-PAUSE_BTN[0],py-PAUSE_BTN[1])<PAUSE_BTN[2]+6){setPause(true);return true}
+ if(!TUT&&!MP&&Math.hypot(px-PAUSE_BTN[0],py-PAUSE_BTN[1])<PAUSE_BTN[2]+6){setPause(true);return true}
  if(px>=SOSO_X+sx-45&&px<=SOSO_X+sx+80&&py>=GROUND-112&&py<=GROUND+7){
   if(TUT){if(TUT.step===5&&!TUT.refreshStarted){TUT.refreshStarted=true;beginRefresh(false);shufCD=SHUFFLE_CD}return true}
+  if(MP&&MP.ob.brk>0){msg={t:1.2,s:'Soso is on a break!'};return true}
   if(shufCD<=0){beginRefresh(false);shufCD=SHUFFLE_CD}return true}
  return false}
 // ---- DRAG AND DROP: items only go into EMPTY slots (no swapping). Dropping on a shelf uses its nearest empty slot.
 const ptr=e=>{const b=cv.getBoundingClientRect();return[(e.clientX-b.left)/b.width*W,(e.clientY-b.top)/b.height*H]};
-function dropTarget(px,py){const c=Math.floor((px-X0)/CWD),r=Math.floor((py-Y0)/RH);if(c<0||c>=COLS||r<0||r>=ROWS||!isOpen(r,c))return null;
+function dropTarget(px,py){const c=Math.floor((px-X0)/CWD),r=Math.floor((py-Y0)/RH);if(c<0||c>=COLS||r<0||r>=ROWS||!isOpen(r,c)||mpCellLocked(r,c))return null;
  let best=null,bd=1e9;for(let i=0;i<3;i++){if(blocked(r,c,i)||G[r][c].slots[i].f)continue;const d=Math.abs(px-slotX(c,i));if(d<bd){bd=d;best=[r,c,i]}}return best}
 cv.addEventListener('pointerdown',e=>{const[px,py]=ptr(e);
- if(state==='title'||state==='option'){UI.press=menuHit(px,py);try{cv.setPointerCapture(e.pointerId)}catch(_){}return}
+ if(state==='title'||state==='option'||state==='lobby'){lastPtr=[px,py];UI.press=menuHit(px,py);try{cv.setPointerCapture(e.pointerId)}catch(_){}return}
  if(tap(px,py))return;
+ lastPtr=[px,py];if(MP&&MP.cd>0)return;
  const c=Math.floor((px-X0)/CWD),r=Math.floor((py-Y0)/RH);if(state!='play'||c<0||c>=COLS||r<0||r>=ROWS||!isOpen(r,c))return;
  const i=Math.max(0,Math.min(2,Math.floor((px-X0-c*CWD-6)/((CWD-12)/3))));if(blocked(r,c,i))return;const s=G[r][c].slots[i];
  if(TUT&&!tutorialCanDrag(r,c,i))return;
- if(s.f){drag={r,c,i,it:s.f,px,py};s.f.pop=.3;s.f.x=px;s.f.y=py-16;try{cv.setPointerCapture(e.pointerId)}catch(_){}}});
-cv.addEventListener('pointermove',e=>{if(!drag)return;const[px,py]=ptr(e);drag.px=px;drag.py=py;drag.it.x=px;drag.it.y=py-16});
+ if(MP){if(mpCellLocked(r,c))return;if(mpCrumbHit(r,c))return;if(s.f&&MP.ob.wind>0&&mpWind(r,c,i))return}
+ if(s.f){const hold=MP&&mpSticky(r,c,i)?VS.stickyHold:0;drag={r,c,i,it:s.f,px,py,hold};s.f.pop=.3;if(!hold){s.f.x=px;s.f.y=py-16}try{cv.setPointerCapture(e.pointerId)}catch(_){}}});
+cv.addEventListener('pointermove',e=>{const[px,py]=ptr(e);lastPtr=[px,py];if(!drag)return;drag.px=px;drag.py=py;if(!(drag.hold>0)){drag.it.x=px;drag.it.y=py-16}});
 cv.addEventListener('pointerup',e=>{
  if(UI.press){const[ux,uy]=ptr(e),id=menuHit(ux,uy),was=UI.press;UI.press=null;if(id===was)menuActivate(id);return}
- if(!drag)return;const[px,py]=ptr(e),d=drag;drag=null;if(state!='play')return;const t=dropTarget(px,py);
+ if(!drag)return;const[px,py]=ptr(e),d=drag;drag=null;if(state!='play')return;if(d.hold>0)return;const t=dropTarget(px,py);
  if(t&&TUT&&!tutorialCanDrop(d,t)){msg={t:1.4,s:'Drop it in the glowing slot!'};return}
  if(t){G[t[0]][t[1]].slots[t[2]].f=d.it;G[d.r][d.c].slots[d.i].f=null;advance(d.r,d.c);d.it.pop=.5;if(compTri(t[0],t[1]))clearComp(t[0],t[1])}});   // else it springs back
 cv.addEventListener('pointercancel',()=>{drag=null;UI.press=null});
 // ---- DEBUG: hold Alt + 1 / 2 / 3 ends the game at once with 20 / 12 / 5 boxes. P or Esc = pause.
 addEventListener('keydown',e=>{
- if(e.altKey&&!TUT&&(state=='play'||state=='pause')){const n={Digit1:20,Digit2:12,Digit3:5}[e.code];
+ if(e.altKey&&!TUT&&!MP&&(state=='play'||state=='pause')){const n={Digit1:20,Digit2:12,Digit3:5}[e.code];
   if(n!=null){e.preventDefault();boxes=n;time=0;queued=0;flyers=[];sel=null;state='over';endT=0;scoreSaved=true;return}}
  if(!e.repeat&&(e.key=='p'||e.key=='P'||e.key=='Escape'))setPause(state=='play')});
 document.addEventListener('visibilitychange',()=>{if(document.hidden)setPause(true)});
 
 
 // ===================== 8. UPDATE =====================
-function update(dt){clock+=dt;if(state=='over'&&!musicHeld)holdMusicForResult();if(state=='title'){updateTitle(dt);return}if(state=='option')return;if(state=='pause'||state=='homePrompt'||soundOpen)return;if(TUT)updateTutorial(dt);if(state=='play'&&refreshAnim){updateRefresh(dt);return;}if(state=='over')drag=null;shufCD=Math.max(0,shufCD-dt);
+function update(dt){clock+=dt;if(state=='over'&&!musicHeld)holdMusicForResult();if(state=='title'){updateTitle(dt);return}if(state=='option'||state=='lobby')return;if(state=='pause'||state=='homePrompt'||soundOpen)return;if(TUT)updateTutorial(dt);if(state=='play'&&refreshAnim){updateRefresh(dt);return;}if(state=='over')drag=null;shufCD=Math.max(0,shufCD-dt);
  G.forEach((row,r)=>row.forEach(cp=>{if(cp.door>=0||cp.lock>=0){const op=cp.door>=0?boxes>=DOOR_AT[cp.door]:boxes>=UNLOCK_AT[cp.lock];cp.dop+=((op?1:0)-cp.dop)*Math.min(1,dt*6)}}));
- if(state=='play'&&!TUT){updateCombo(dt);time-=dt;if(time<=0){time=0;state='over';endT=0}}else if(state=='over'){endT+=dt;if(!scoreSaved){scoreSaved=true;if(boxes>highScore){highScore=boxes;store.set(BEST_KEY,String(boxes))}}}
+ if(MP&&state=='play'&&MP.cd>0){MP.cd-=dt}else if(state=='play'&&!TUT){updateCombo(dt);if(MP)mpUpdate(dt);time-=dt;if(time<=0){time=0;if(MP)mpTimeUp();else{state='over';endT=0}}}else if(state=='over'){endT+=dt;if(MP)MP.waitT+=dt;if(!scoreSaved){scoreSaved=true;if(boxes>highScore){highScore=boxes;store.set(BEST_KEY,String(boxes))}}}
  msg.t=Math.max(0,msg.t-dt);
  G.forEach((row,r)=>row.forEach((cp,c)=>cp.slots.forEach((s,i)=>{const k=Math.min(1,dt*14);
   if(s.f&&!(drag&&drag.it===s.f)){s.f.x+=(slotX(c,i)-s.f.x)*k;s.f.y+=(slotY(r)-s.f.y)*k;s.f.pop=Math.max(0,s.f.pop-dt*3)}})));
@@ -631,16 +636,18 @@ function drawHUD(){
  txt(timeBonusLeft>0?timeBonusText:Math.ceil(time),cx,cy+6,19,timeBonusLeft>0?'#48a875':'#8a6a7c');
  drawRestartButton();
  drawSoundButton();
- if(!TUT){const [x,y,pr]=PAUSE_BTN;ci(x,y,pr,'#5ba8ef','#2a6fc4',2);
+ if(!TUT&&!MP){const [x,y,pr]=PAUSE_BTN;ci(x,y,pr,'#5ba8ef','#2a6fc4',2);
  rr(x-5,y-6,3,12,1,'#fff');rr(x+2,y-6,3,12,1,'#fff');
  txt('Boxes: '+boxes,W-12,H-9,22,'#8a6a7c','right');}
  const nx=[...DOOR_AT,...UNLOCK_AT].filter(u=>u>boxes).sort((a,b)=>a-b)[0];
- if(nx&&!TUT)txt('Next shelf at '+nx+' boxes',W/2,Y0+RH*ROWS+24,12,'#7f9bbf');
+ if(MP)drawVsHUD();
+ if(nx&&!TUT&&!MP)txt('Next shelf at '+nx+' boxes',W/2,Y0+RH*ROWS+24,12,'#7f9bbf');
  if(msg.t>0){ctx.globalAlpha=Math.min(1,msg.t);txt(msg.s,W/2,H/2-40,20,'#2f7fe0');ctx.globalAlpha=1;}
 }
 // Manual refresh cooldown: dark silhouette refills with normal colour from the feet up.
 function drawSosoScene(){
  if(refreshAnim)return;
+ if(MP&&MP.ob.brk>0){ctx.save();ctx.filter='brightness(0.45)';drawSosoSceneArt();ctx.restore();plain('z z Z',SOSO_X+40,GROUND-118+Math.sin(clock*3)*3,18,'#6f87b0');plain(Math.ceil(MP.ob.brk)+'s',SOSO_X,GROUND+16,12,'#6f87b0');return}
  if(shufCD<=0){drawSosoSceneArt();return;}
  const ready=cl(1-shufCD/SHUFFLE_CD),x=SOSO_X+sx;
  ctx.save();ctx.filter='brightness(0.38)';drawSosoSceneArt();ctx.restore();
@@ -672,6 +679,7 @@ const BTN_W=164,BTN_H=39,BTN_X=(W-BTN_W)/2;
 const TITLE_BUTTONS=[
  {id:'start',   label:'Start Game',y:262,fill:['#a6dafc','#79c2f6']},
  {id:'option',  label:'Option',    y:312,fill:['#cde8fb','#b6dcf8']},
+ {id:'versus',  label:'Versus',    y:362,fill:['#d6ecfb','#bfdff7']},   // online head-to-head (uses the reserved slot)
  {id:'tutorial',label:'Tutorial',  y:412,fill:['#dfeefb','#cce3f7']},
 ];
 let highScore=parseInt(store.get(BEST_KEY),10)||0,scoreSaved=false,soundOpen=false;
@@ -718,9 +726,11 @@ function drawOption(){
  menuButton(OPT_BACK.x,OPT_BACK.y,OPT_BACK.w,OPT_BACK.h,'Back',['#a6dafc','#79c2f6'],UI.press==='back');
  drawSoso(W/2,596,.5,{face:soundOn?'h':'n',arms:'side'});
 }
-function menuList(){return state==='title'?TITLE_BUTTONS.map(b=>({id:b.id,x:BTN_X,y:b.y,w:BTN_W,h:BTN_H})):state==='option'?OPT_CHIPS.concat([OPT_BACK]):[]}
+function menuList(){if(state==='lobby')return lobbyButtons();return state==='title'?TITLE_BUTTONS.map(b=>({id:b.id,x:BTN_X,y:b.y,w:BTN_W,h:BTN_H})):state==='option'?OPT_CHIPS.concat([OPT_BACK]):[]}
 function menuHit(px,py){for(const b of menuList())if(inside(px,py,[b.x,b.y,b.w,b.h]))return b.id;return null}
 function menuActivate(id){
+ if(state==='lobby'){lobbyActivate(id);return}
+ if(id==='versus'){openLobby();return}
  if(id==='start')newGame();
  else if(id==='option')state='option';
  else if(id==='tutorial')startTutorial();
@@ -739,11 +749,13 @@ function drawSoundButton(){
 function draw(){ctx.setTransform(S,0,0,S,0,0);drawBG();
  if(state=='title'){drawTitle();return}
  if(state=='option'){drawOption();return}
- drawShelf();drawSosoScene();drawFlyers();drawHUD();
+ if(state=='lobby'){drawLobby();return}
+ drawShelf();drawSosoScene();drawFlyers();if(MP)drawVsBoardFX();drawHUD();
  if(TUT){drawTutorialDim();drawTutorialHints()}
- drawDrag();drawRefresh();
+ drawDrag();drawRefresh();if(MP)drawVsDark();
  if(TUT)drawTutorialBubble();
- if(state=='over')drawOver();
+ if(state=='over'){if(MP)drawVsOver();else drawOver()}
+ if(MP&&state==='play'){drawVsCountdown();if(MP.leaving)drawHomePrompt()}
  if(state==='pause')drawPauseScreen();
  if(state==='homePrompt')drawHomePrompt();
 }
@@ -862,5 +874,297 @@ function drawTutorialBubble(){
 
 // ===================== 10. MAIN LOOP =====================
 let last=performance.now();
+// ===================== 11. VERSUS MODE (online head-to-head) =====================
+// Two phones, same shelf layout (shared seed). Each player plays their own board; only small messages cross the network
+// (score, combo bonuses, obstructions). Peer-to-peer through PeerJS, so no server of your own is needed - players share a 4-digit room code.
+// ---- EDIT VERSUS RULES HERE ----
+const VS={
+  ver:'vs1',                         // both phones must run the same version
+  duration:120, maxBonus:60,         // 120 s round, bonus time capped at +60 s
+  combo:{activationMatches:3,activationWindow:10,startWindow:15,minWindow:7,fastAt:25,max:30,
+         bonusAt:3,bonusSeconds:2,   // every 3 combo: +2 s for BOTH players
+         maxBonusSeconds:0},
+  obstructEvery:5,                   // every 5 combo you send an obstruction to the opponent
+  lockCount:[[10,2],[25,3],[30,5]],  // [combo up to, cabinets locked]
+  x2Every:10, x2Seconds:10,          // every 10 combo: your score counts double for 10 s
+  shieldEvery:15, shieldMax:1,       // every 15 combo: one shield (blocks the next incoming obstruction)
+  // Which packed item triggers which obstruction (item numbers = ITEM_PATHS order). Items not listed → locked cabinets.
+  itemOb:{2:'dark',3:'wind',4:'sticky',5:'crumb',6:'fog',9:'scramble',11:'brk'},
+  // 2 flashlight=lights out · 3 handheld fan=strong winds · 4 blueberry jam=sticky shelf · 5 potato chips=crumb mess
+  // 6 cup noodle=steam fog · 9 cookie tin=shuffle scramble · 11 strawberry milk=Soso break
+  sec:{lock:4,dark:6,wind:6,brk:10,sticky:6,fog:5,crumbAuto:8},
+  stickyHold:.8,                     // seconds you must hold an item on a jammed slot before it lifts
+  stickySlots:2, fogShelves:3, crumbShelves:4,
+};
+const OB_NAME={lock:'LOCKED CABINETS',dark:'LIGHTS OUT',wind:'STRONG WINDS',brk:'SOSO ON BREAK',sticky:'STICKY SHELF',fog:'STEAM FOG',crumb:'CRUMB MESS',scramble:'SHUFFLE SCRAMBLE'};
+const ICE={iceServers:[{urls:'stun:stun.l.google.com:19302'},{urls:'turn:openrelay.metered.ca:80',username:'openrelayproject',credential:'openrelayproject'},{urls:'turn:openrelay.metered.ca:443?transport=tcp',username:'openrelayproject',credential:'openrelayproject'}]};
+let MP_SAVED=null;
+const mulberry=a=>()=>{a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296};
+function dealForMode(){if(MP&&MP.seed!=null){RNG=mulberry(MP.seed);try{deal()}finally{RNG=Math.random}}else deal()}
+
+// ---- network layer (PeerJS room code · or ?net=local BroadcastChannel for testing on one computer) ----
+const NET={kind:'peer',peer:null,conn:null,bc:null,me:Math.random().toString(36).slice(2),open:false,lastRx:0,hb:0,on:{}};
+const netKind=()=>/[?&]net=local/.test(location.search)?'local':'peer';
+function netClose(){
+ clearInterval(NET.hb);NET.hb=0;NET.open=false;
+ try{if(NET.conn)NET.conn.close()}catch(e){}try{if(NET.peer)NET.peer.destroy()}catch(e){}try{if(NET.bc)NET.bc.close()}catch(e){}
+ NET.conn=NET.peer=NET.bc=null;NET.on={};
+}
+function netSend(o){try{if(NET.kind==='local'){if(NET.bc)NET.bc.postMessage({from:NET.me,d:o})}else if(NET.conn&&NET.conn.open)NET.conn.send(o)}catch(e){}}
+function netRx(m){NET.lastRx=performance.now();if(m&&m.t!=='ping'&&NET.on.msg)NET.on.msg(m)}
+function netOpened(){if(NET.open)return;NET.open=true;NET.lastRx=performance.now();
+ NET.hb=setInterval(()=>{netSend({t:'ping'});if(performance.now()-NET.lastRx>9000)netLost('timeout')},2000);
+ if(NET.on.open)NET.on.open()}
+function netLost(why){const f=NET.on.close;clearInterval(NET.hb);NET.hb=0;NET.open=false;if(f)f(why)}
+function loadPeerJS(){return new Promise((ok,no)=>{if(window.Peer)return ok();const s=document.createElement('script');s.src='https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js';s.onload=ok;s.onerror=()=>no(new Error('load'));document.head.appendChild(s)})}
+function netHost(code,cb){
+ NET.kind=netKind();NET.on=cb;
+ if(NET.kind==='local'){const bc=NET.bc=new BroadcastChannel('sososs-'+code);
+  bc.onmessage=e=>{const m=e.data;if(!m||m.from===NET.me)return;if(m.d.t==='__hello'){bc.postMessage({from:NET.me,d:{t:'__welcome'}});netOpened()}else netRx(m.d)};
+  setTimeout(()=>cb.ready&&cb.ready(),0);return}
+ loadPeerJS().then(()=>{
+  const p=NET.peer=new Peer('sososs-'+code,{config:ICE});
+  p.on('open',()=>cb.ready&&cb.ready());
+  p.on('connection',c=>{if(NET.conn){c.close();return}NET.conn=c;c.on('data',netRx);c.on('close',()=>netLost('closed'));c.on('error',()=>netLost('error'));if(c.open)netOpened();else c.on('open',netOpened)});
+  p.on('error',e=>{if(e.type==='unavailable-id')cb.taken&&cb.taken();else cb.err&&cb.err('Connection problem ('+e.type+')')});
+  p.on('disconnected',()=>{try{p.reconnect()}catch(e){}});
+ }).catch(()=>cb.err&&cb.err("Can't reach the matchmaking server"));
+}
+function netJoin(code,cb){
+ NET.kind=netKind();NET.on=cb;
+ if(NET.kind==='local'){const bc=NET.bc=new BroadcastChannel('sososs-'+code);
+  bc.onmessage=e=>{const m=e.data;if(!m||m.from===NET.me)return;if(m.d.t==='__welcome')netOpened();else netRx(m.d)};
+  let n=0;const t=setInterval(()=>{if(NET.open||++n>12){clearInterval(t);if(!NET.open&&cb.err)cb.err('Room not found');return}bc.postMessage({from:NET.me,d:{t:'__hello'}})},250);return}
+ loadPeerJS().then(()=>{
+  const p=NET.peer=new Peer({config:ICE});
+  p.on('open',()=>{const c=NET.conn=p.connect('sososs-'+code,{reliable:true});c.on('data',netRx);c.on('close',()=>netLost('closed'));c.on('error',()=>netLost('error'));if(c.open)netOpened();else c.on('open',netOpened)});
+  p.on('error',e=>{cb.err&&cb.err(e.type==='peer-unavailable'?'Room not found':'Connection problem ('+e.type+')')});
+ }).catch(()=>cb.err&&cb.err("Can't reach the matchmaking server"));
+ setTimeout(()=>{if(!NET.open&&cb.err&&state==='lobby')cb.err('Room not found')},12000);
+}
+
+// ---- lobby screens ----
+const LB={ui:'menu',code:'',input:'',err:'',tries:0};
+function openLobby(){netClose();LB.ui='menu';LB.err='';LB.input='';state='lobby'}
+function lobbyFail(s){netClose();LB.ui='error';LB.err=s}
+function lobbyCreate(){
+ LB.ui='hosting';LB.code=''+(1000+Math.floor(Math.random()*9000));
+ netHost(LB.code,{
+  ready(){},
+  taken(){if(++LB.tries>6){lobbyFail('Could not open a room');return}netClose();lobbyCreate()},
+  err:lobbyFail,
+  open(){mpStart(true)},
+  msg:mpOnMsg,close:mpOnClose});
+}
+function lobbyJoin(){
+ LB.ui='connecting';
+ netJoin(LB.input,{err:lobbyFail,open(){LB.ui='connecting'},msg:mpOnMsg,close:mpOnClose});
+}
+function lobbyButtons(){
+ const B=(id,y,label)=>({id,x:BTN_X,y,w:BTN_W,h:BTN_H,label});
+ if(LB.ui==='menu')return[B('create',210,'Create Room'),B('join',260,'Join Room'),B('lback',340,'Back')];
+ if(LB.ui==='joining'){const k=[];for(let n=0;n<12;n++){const r=Math.floor(n/3),c=n%3,id=n<9?'k'+(n+1):n===9?'kdel':n===10?'k0':'kgo';
+   k.push({id,x:75+c*70,y:248+r*46,w:62,h:38,label:n===9?'DEL':n===11?'GO':id[1]})}
+  k.push(B('lback',440,'Back'));return k}
+ return[B('lback',400,LB.ui==='error'?'Back':'Cancel')];
+}
+function lobbyActivate(id){
+ if(id==='create'){LB.tries=0;lobbyCreate()}
+ else if(id==='join'){LB.ui='joining';LB.input=''}
+ else if(id==='lback'){if(LB.ui==='menu'){netClose();state='title'}else{netClose();LB.ui='menu'}}
+ else if(id==='kdel')LB.input=LB.input.slice(0,-1);
+ else if(id==='kgo'){if(LB.input.length===4)lobbyJoin()}
+ else if(id[0]==='k'&&LB.input.length<4)LB.input+=id[1];
+}
+function drawLobby(){
+ rr(24,100,312,LB.ui==='joining'?400:360,22,'rgba(255,255,255,.94)','#a9c9ee',2.5);
+ txt('Versus',W/2,150,34,'#ff6b9a');
+ if(LB.ui==='menu'){plain('Play a friend online',W/2,186,15,'#3d5a80')}
+ else if(LB.ui==='hosting'){plain('Your room code',W/2,200,17,'#3d5a80');plain(LB.code.split('').join(' '),W/2,268,50,'#2a6fc4');
+  plain('Tell your friend to tap',W/2,312,14,'#7f9bbf');plain('Versus > Join Room',W/2,332,14,'#7f9bbf');plain('Waiting for opponent'+'.'.repeat(1+Math.floor(clock*2)%3),W/2,372,15,'#3d5a80')}
+ else if(LB.ui==='joining'){plain('Enter room code',W/2,190,17,'#3d5a80');
+  for(let i=0;i<4;i++){rr(80+i*52,200,44,38,8,'#eef6fd',MENU_INK,2.5);if(LB.input[i])plain(LB.input[i],102+i*52,228,26)}}
+ else if(LB.ui==='connecting'){plain('Connecting'+'.'.repeat(1+Math.floor(clock*2)%3),W/2,250,20,'#3d5a80')}
+ else if(LB.ui==='error'){plain(LB.err,W/2,250,16,'#e05a7a')}
+ lobbyButtons().forEach(b=>menuButton(b.x,b.y,b.w,b.h,b.label,b.id==='kgo'?['#a6dafc','#79c2f6']:['#eef6fd','#dcebfa'],UI.press===b.id,b.id[0]==='k'&&b.id.length===2?20:b.id==='kdel'||b.id==='kgo'?14:19));
+ if(LB.ui!=='joining')drawSoso(W/2,608,.38,{face:LB.ui==='error'?'n':'h',arms:'side'});
+}
+
+// ---- match state ----
+function mpNew(host){return{host,seed:null,cd:3.2,score:0,x2:0,shield:0,lad:0,packed:[],lastCombo:0,stT:0,
+ opp:{score:0,combo:0,shield:0,x2:0},oppFin:null,oppLeft:false,fin:false,waitT:0,leaving:false,
+ ob:{lock:null,sticky:null,fog:null,dark:0,wind:0,brk:0,crumb:[]}}}
+function mpApplySettings(){if(MP_SAVED)return;MP_SAVED={combo:Object.assign({},COMBO_SETTINGS),maxBonus:GAME_SETTINGS.maxBonusTimePerGame};
+ Object.assign(COMBO_SETTINGS,VS.combo);GAME_SETTINGS.maxBonusTimePerGame=VS.maxBonus}
+function mpTeardown(){
+ if(MP&&MP.fin===false&&state==='play'){}   // (leaving mid-match: opponent is told by the 'bye' sent before this)
+ if(MP_SAVED){Object.assign(COMBO_SETTINGS,MP_SAVED.combo);GAME_SETTINGS.maxBonusTimePerGame=MP_SAVED.maxBonus;MP_SAVED=null}
+ MP=null;netClose();
+}
+function mpStart(host){
+ if(host){const seed=1+Math.floor(Math.random()*2e9);netSend({t:'start',seed,ver:VS.ver});mpBegin(true,seed)}
+}
+function mpBegin(host,seed){
+ MP=mpNew(host);MP.seed=seed;mpApplySettings();
+ newGame();time=VS.duration;timerPeak=time;scoreSaved=true;MP.cd=3.2;state='play';
+}
+function mpOnMsg(m){
+ if(m.t==='start'){if(m.ver!==VS.ver){lobbyFail('Both players need the latest version');return}mpBegin(false,m.seed);return}
+ if(!MP)return;
+ if(m.t==='ob')mpApplyOb(m.k,m.n||0);
+ else if(m.t==='bonus'){const b=Math.min(m.s,Math.max(0,GAME_SETTINGS.maxBonusTimePerGame-bonusTimeEarned));if(b>0){bonusTimeEarned+=b;time+=b;timerPeak=Math.max(timerPeak,time);timeBonusText='+'+b;timeBonusLeft=.4}}
+ else if(m.t==='st'){MP.opp={score:m.s,combo:m.c,shield:m.sh,x2:m.x}}
+ else if(m.t==='blocked'){msg={t:1.6,s:'Blocked by their shield!'}}
+ else if(m.t==='fin'){MP.oppFin=m.s}
+ else if(m.t==='bye')mpOnClose('bye');
+}
+function mpOnClose(why){
+ if(!MP){if(state==='lobby')lobbyFail('Connection lost');return}
+ MP.oppLeft=true;
+ if(state==='play'&&!MP.fin)mpTimeUp(true);
+}
+function mpTimeUp(left){
+ time=0;state='over';endT=0;drag=null;MP.fin=true;MP.waitT=0;
+ MP.ob={lock:null,sticky:null,fog:null,dark:0,wind:0,brk:0,crumb:[]};
+ netSend({t:'fin',s:MP.score});
+}
+const mpReady=()=>MP.oppFin!=null||MP.oppLeft||MP.waitT>6;
+function mpResult(){const o=MP.oppFin!=null?MP.oppFin:MP.opp.score;return MP.oppLeft&&MP.oppFin==null&&MP.score>=o?'win':MP.score>o?'win':MP.score<o?'lose':'draw'}
+function mpExit(){if(MP)netSend({t:'bye'});returnToHome();releaseMusicForNewRound()}
+
+// ---- scoring / combo ladder / sending obstructions ----
+function lockCountFor(c){for(const[m,n]of VS.lockCount)if(c<=m)return n;return VS.lockCount[VS.lockCount.length-1][1]}
+function mpPickKind(){
+ const cnt={};MP.packed.forEach(t=>{if(VS.itemOb[t])cnt[t]=(cnt[t]||0)+1});
+ const ts=Object.keys(cnt);if(!ts.length)return'lock';
+ const top=Math.max(...ts.map(t=>cnt[t])),pool=ts.filter(t=>cnt[t]===top);
+ return VS.itemOb[+pool[rnd(pool.length)]];
+}
+function mpOnMatch(pc,t){
+ MP.score+=MP.x2>0?2:1;MP.packed.push(t);
+ // COUNTER: completing a set while an obstruction is active ends it early
+ if(mpActive()){const o=MP.ob;o.lock=o.sticky=o.fog=null;o.dark=o.wind=o.brk=0;o.crumb=[];msg={t:1.4,s:'Counter!'}}
+ const lp=MP.lad;MP.lad=combo<COMBO_SETTINGS.activationMatches?0:pc>=COMBO_SETTINGS.activationMatches?lp+1:combo;
+ const cross=n=>n>0&&Math.floor(MP.lad/n)>Math.floor(lp/n);
+ if(cross(VS.obstructEvery)){const k=mpPickKind(),n=k==='lock'?lockCountFor(combo):0;MP.packed=[];netSend({t:'ob',k,n});msg={t:1.6,s:'Sent: '+OB_NAME[k]+'!'}}
+ if(cross(VS.x2Every)){MP.x2=VS.x2Seconds;msg={t:1.6,s:'x2 SCORE!'}}
+ if(cross(VS.shieldEvery)&&MP.shield<VS.shieldMax){MP.shield++;msg={t:1.6,s:'Shield ready!'}}
+}
+const mpActive=()=>{const o=MP.ob;return !!(o.lock||o.sticky||o.fog||o.dark>0||o.wind>0||o.brk>0||o.crumb.length)};
+
+// ---- receiving obstructions ----
+const openCells=()=>{const a=[];for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++)if(isOpen(r,c))a.push([r,c]);return a};
+const pickCells=(n,pref)=>{const a=shuf(openCells());if(pref)a.sort((x,y)=>(G[y[0]][y[1]].slots.some(s=>s.f)?1:0)-(G[x[0]][x[1]].slots.some(s=>s.f)?1:0)+(Math.random()-.5)*.01);return a.slice(0,n)};
+function mpApplyOb(kind,n){
+ const o=MP.ob;
+ if(MP.shield>0){MP.shield--;netSend({t:'blocked',k:kind});msg={t:1.8,s:'Shield blocked '+OB_NAME[kind]+'!'};return}
+ msg={t:1.4,s:OB_NAME[kind]+'!'};
+ if(kind==='lock')o.lock={t:VS.sec.lock,cells:pickCells(Math.max(1,n))};
+ else if(kind==='dark')o.dark=VS.sec.dark;
+ else if(kind==='wind')o.wind=VS.sec.wind;
+ else if(kind==='brk')o.brk=VS.sec.brk;
+ else if(kind==='fog')o.fog={t:VS.sec.fog,cells:pickCells(VS.fogShelves,true)};
+ else if(kind==='crumb')o.crumb=pickCells(VS.crumbShelves,true).map(([r,c])=>({r,c,t:VS.sec.crumbAuto}));
+ else if(kind==='sticky'){const sl=[];openCells().forEach(([r,c])=>{for(let i=0;i<3;i++)if(!blocked(r,c,i))sl.push([r,c,i,G[r][c].slots[i].f?0:1])});
+  sl.sort((a,b)=>a[3]-b[3]+(Math.random()-.5)*1.5);o.sticky={t:VS.sec.sticky,slots:sl.slice(0,VS.stickySlots)}}
+ else if(kind==='scramble')mpScramble();
+}
+function mpScramble(){
+ drag=null;const spots=[];
+ for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++)if(isOpen(r,c))for(let i=0;i<3;i++)if(!blocked(r,c,i)&&G[r][c].slots[i].f)spots.push([r,c,i]);
+ const items=spots.map(p=>G[p[0]][p[1]].slots[p[2]].f);if(items.length<2)return;
+ for(let k=0;k<40;k++){const perm=shuf(items.slice());spots.forEach((p,j)=>{G[p[0]][p[1]].slots[p[2]].f=perm[j]});
+  let tri=false;for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++)if(compTri(r,c))tri=true;
+  if(!tri&&perm.some((it,j)=>it!==items[j]))break;
+  if(k===39)spots.forEach((p,j)=>{G[p[0]][p[1]].slots[p[2]].f=items[j]})}
+ spots.forEach(p=>{const it=G[p[0]][p[1]].slots[p[2]].f;if(it)it.pop=.6});
+}
+const mpCellLocked=(r,c)=>!!(MP&&MP.ob.lock&&MP.ob.lock.cells.some(p=>p[0]===r&&p[1]===c));
+function mpCrumbHit(r,c){const a=MP.ob.crumb,i=a.findIndex(q=>q.r===r&&q.c===c);if(i<0)return false;a.splice(i,1);return true}
+const mpSticky=(r,c,i)=>!!(MP&&MP.ob.sticky&&MP.ob.sticky.slots.some(p=>p[0]===r&&p[1]===c&&p[2]===i));
+function mpWind(r,c,i){
+ const it=G[r][c].slots[i].f,spots=[];
+ openCells().forEach(([rr2,cc])=>{if(mpCellLocked(rr2,cc))return;for(let j=0;j<3;j++)if(!blocked(rr2,cc,j)&&!G[rr2][cc].slots[j].f&&!(rr2===r&&cc===c&&j===i))spots.push([rr2,cc,j])});
+ if(!spots.length||!it)return false;
+ const[tr,tc,tj]=spots[rnd(spots.length)];
+ G[tr][tc].slots[tj].f=it;G[r][c].slots[i].f=null;advance(r,c);it.pop=.6;
+ if(compTri(tr,tc))clearComp(tr,tc);
+ return true;
+}
+
+// ---- per-frame ----
+function mpUpdate(dt){
+ const o=MP.ob;
+ if(o.lock&&(o.lock.t-=dt)<=0)o.lock=null;
+ if(o.sticky&&(o.sticky.t-=dt)<=0)o.sticky=null;
+ if(o.fog&&(o.fog.t-=dt)<=0)o.fog=null;
+ o.dark=Math.max(0,o.dark-dt);o.wind=Math.max(0,o.wind-dt);o.brk=Math.max(0,o.brk-dt);MP.x2=Math.max(0,MP.x2-dt);
+ o.crumb.forEach(q=>q.t-=dt);o.crumb=o.crumb.filter(q=>q.t>0);
+ if(combo===0&&MP.lastCombo>0){MP.lad=0;MP.packed=[]}MP.lastCombo=combo;
+ if(drag&&drag.hold>0){drag.hold-=dt;if(drag.hold<=0){drag.it.x=drag.px;drag.it.y=drag.py-16}}
+ if((MP.stT-=dt)<=0){MP.stT=.4;netSend({t:'st',s:MP.score,c:combo,sh:MP.shield,x:Math.ceil(MP.x2)})}
+}
+
+// ---- drawing ----
+function drawVsBoardFX(){
+ const o=MP.ob;
+ if(o.sticky)o.sticky.slots.forEach(([r,c,i])=>{const x=slotX(c,i),y=slotY(r)+14;
+  ctx.fillStyle='rgba(88,64,170,.85)';ctx.beginPath();ctx.ellipse(x,y,22,9,0,0,7);ctx.fill();ctx.fillStyle='rgba(180,160,255,.55)';ctx.beginPath();ctx.ellipse(x-6,y-3,7,2.6,0,0,7);ctx.fill();
+  ctx.fillStyle='rgba(88,64,170,.85)';ctx.beginPath();ctx.ellipse(x+14,y+7,4,6,0,0,7);ctx.fill()});
+ if(o.fog)o.fog.cells.forEach(([r,c])=>{const x=X0+c*CWD,y=Y0+r*RH;ctx.save();ctx.globalAlpha=Math.min(1,o.fog.t*2);
+  rr(x+3,y+3,CWD-6,RH-6,8,'rgba(238,246,255,.93)');
+  for(let k=0;k<6;k++){const px=x+16+k*18+Math.sin(clock*1.6+k)*5,py=y+30+(k%3)*22+Math.cos(clock*1.3+k*2)*4;ci(px,py,16+(k%2)*5,'rgba(255,255,255,.9)')}ctx.restore()});
+ o.crumb.forEach(q=>{const x=X0+q.c*CWD,y=Y0+q.r*RH;rr(x+3,y+3,CWD-6,RH-6,8,'rgba(150,100,50,.22)');
+  for(let k=0;k<26;k++){const a=(k*97)%100/100,b=(k*53+q.r*7+q.c*13)%100/100;ctx.fillStyle=k%3?'#b97a3c':'#8a5224';ctx.beginPath();ctx.arc(x+10+a*(CWD-20),y+12+b*(RH-30),1.8+(k%3)*.7,0,7);ctx.fill()}
+  plain('TAP TO WIPE',x+CWD/2,y+RH/2+4,12,'#6b3920')});
+ if(o.lock)o.lock.cells.forEach(([r,c])=>{const x=X0+c*CWD,y=Y0+r*RH;
+  rr(x+3,y+3,CWD-6,RH-6,8,grad(y,y+RH,'#dfe7f1','#b7c4d6'),'#7d90a8',2.5);rr(x+8,y+8,CWD-16,RH-16,5,null,'#c4d0de',1.5);
+  const cx=x+CWD/2,cy=y+RH/2-6;ctx.strokeStyle='#5d7089';ctx.lineWidth=4;ctx.beginPath();ctx.arc(cx,cy-4,9,Math.PI,0);ctx.stroke();
+  rr(cx-13,cy-4,26,20,5,grad(cy-4,cy+16,'#f0c64e','#d29a1c'),'#8a6410',1.8);ci(cx,cy+6,3,'#6b4a0c');
+  plain(Math.ceil(o.lock.t)+'s',cx,y+RH-14,15,'#3d5a80')});
+ if(o.wind>0){ctx.strokeStyle='rgba(120,170,230,.55)';ctx.lineWidth=2;ctx.lineCap='round';
+  for(let k=0;k<9;k++){const yy=Y0+20+k*44+(k%2)*12,xx=((clock*420+k*97)%520)-80;ctx.beginPath();ctx.moveTo(xx,yy);ctx.bezierCurveTo(xx+30,yy-8,xx+60,yy+8,xx+90,yy);ctx.stroke()}}
+}
+function drawVsDark(){
+ if(!(MP.ob.dark>0))return;
+ const lp=lastPtr,bx=X0-8,by=Y0-8,bw=CWD*COLS+16,bh=RH*ROWS+16;
+ ctx.save();ctx.beginPath();ctx.roundRect(bx,by,bw,bh,12);ctx.roundRect(lp[0]-CWD/2,lp[1]-RH/2,CWD,RH,14);
+ ctx.fillStyle='rgba(6,12,34,.96)';ctx.fill('evenodd');
+ ctx.strokeStyle='rgba(255,236,150,.6)';ctx.lineWidth=2;ctx.beginPath();ctx.roundRect(lp[0]-CWD/2,lp[1]-RH/2,CWD,RH,14);ctx.stroke();ctx.restore();
+}
+function drawVsHUD(){
+ const o=MP.ob;
+ txt('You  '+MP.score,W-12,H-34,22,'#2a6fc4','right');
+ plain('Opp  '+MP.opp.score+'  ·  combo '+MP.opp.combo,W-12,H-12,13,'#8a6a7c','right');
+ let cx=W-12;
+ const chip=(label,fill,stroke)=>{ctx.font='700 12px '+F;const w=ctx.measureText(label).width+16;rr(cx-w,H-82,w,20,10,fill,stroke,1.6);plain(label,cx-w/2,H-68,12,stroke);cx-=w+6};
+ if(MP.x2>0)chip('x2  '+Math.ceil(MP.x2)+'s','#fff2b8','#c08a10');
+ if(MP.shield>0)chip('SHIELD','#d8ecff','#2a6fc4');
+ // banner for the obstruction currently on you
+ const act=[];if(o.lock)act.push(['lock',o.lock.t]);if(o.dark>0)act.push(['dark',o.dark]);if(o.wind>0)act.push(['wind',o.wind]);if(o.brk>0)act.push(['brk',o.brk]);
+ if(o.sticky)act.push(['sticky',o.sticky.t]);if(o.fog)act.push(['fog',o.fog.t]);if(o.crumb.length)act.push(['crumb',o.crumb[0].t]);
+ if(act.length){const[k,t]=act[0],pulse=.6+.4*Math.sin(clock*8);ctx.globalAlpha=pulse;txt(OB_NAME[k]+(k==='crumb'?'':'  '+Math.ceil(t)+'s'),W/2,Y0+RH*ROWS+24,15,'#e05a7a');ctx.globalAlpha=1;
+  plain('Pack a set to cancel it!',W/2,Y0+RH*ROWS+38,11,'#7f9bbf')}
+}
+function drawVsCountdown(){
+ if(!(MP.cd>0))return;ctx.fillStyle='rgba(30,60,110,.35)';ctx.fillRect(0,0,W,H);
+ const n=Math.ceil(MP.cd-.2),s=n>0?''+n:'GO!';txt(s,W/2,H/2,n>0?96:70,'#ffffff');
+ plain('Pack sets of 3 to beat your opponent!',W/2,H/2+48,14,'#ffffff');
+}
+function drawVsOver(){
+ ctx.fillStyle='rgba(244,249,255,.95)';ctx.fillRect(0,0,W,H);
+ if(!mpReady()){txt('Time\'s up!',W/2,200,36,'#ff6b9a');plain('Waiting for opponent'+'.'.repeat(1+Math.floor(clock*2)%3),W/2,260,18,'#3d5a80');drawSoso(150,505,.66,{face:'n',arms:'side'});return}
+ const res=mpResult(),opp=MP.oppFin!=null?MP.oppFin:MP.opp.score;
+ txt(res==='win'?'You win!':res==='lose'?'You lose':'Draw!',W/2,100,40,res==='lose'?'#6f87b0':'#ff6b9a');
+ txt('You  '+MP.score+'   -   '+opp+'  Opp',W/2,152,26,'#8a6a7c');
+ if(MP.oppLeft&&MP.oppFin==null)plain('Your opponent left the match',W/2,184,14,'#7f9bbf');
+ const t=clock,sn=Math.sin,K=.66;
+ if(res==='win'){const j=Math.abs(sn(t*5));drawSoso(150,505,K,{face:'h',arms:'up',hop:-j*48,tuck:j,sq:1+.07*(1-j)})}
+ else if(res==='draw')drawSoso(150,505,K,{face:'h',arms:'side'});
+ else{const kk=Math.max(0,sn(t*4));drawSoso(150,505,K,{face:'a',arms:'side',kick:kk,prop:()=>boxU('box_closed',315+kk*16,GY-2,null,1)})}
+ txt(res==='win'?'Great stocking!':res==='lose'?'So close... try again!':'A perfectly tidy tie!',W/2,556,19,'#8a6a7c');
+ if(endT>.8)txt('Tap to return to menu',W/2,600,21,'#ff6b9a');
+}
+
 function loop(n){const dt=Math.min(.05,(n-last)/1000);last=n;dtG=dt;update(dt);draw();requestAnimationFrame(loop)}
 requestAnimationFrame(loop);
