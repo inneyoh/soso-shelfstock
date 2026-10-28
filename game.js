@@ -121,6 +121,7 @@ function drawSoso(x,y,k,o){o=o||{};const f=o.face||'n',ph=o.ph||0,sn=Math.sin,PI
 // Browsers refuse sound until the player touches the page, so the track is started immediately on load AND retried on the
 // very first tap / click / key press.
 const MUSIC_FILE='asset/audio/stockspree.mp3';            // keep the folder name aligned with GitHub (asset, singular)
+const MUSIC_VS='asset/audio/stockshufflers.mp3';           // Versus-mode BGM
 const SOUND_KEY='sosoStockShuffle.sound',BEST_KEY='sosoStockShuffle.best';
 const store={get(k){try{return localStorage.getItem(k)}catch(e){return null}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
 let soundOn=store.get(SOUND_KEY)!=='off';                  // Sound ON / OFF (saved on the device)
@@ -143,6 +144,11 @@ function startMusic(){
 }
 function stopMusic(){gameplayMusic.pause();try{if(navigator.audioSession)navigator.audioSession.type='auto'}catch(e){}}
 function setSound(on){soundOn=on;store.set(SOUND_KEY,on?'on':'off');if(on){armUnlock();startMusic()}else{stopMusic();sfxStopAll()}}
+function setTrack(file){                                  // swap BGM (Versus uses its own track)
+ if(gameplayMusic.getAttribute('src')===file)return;
+ gameplayMusic.pause();gameplayMusic.src=file;gameplayMusic.loop=true;gameplayMusic.currentTime=0;
+ if(shouldPlay()){armUnlock();startMusic()}
+}
 function holdMusicForResult(){musicHeld=true;stopMusic()}                    // result screen appears
 function releaseMusicForNewRound(){musicHeld=false;gameplayMusic.currentTime=0;armUnlock();startMusic()}
 armUnlock();startMusic();
@@ -896,10 +902,14 @@ const VS={
   itemOb:{2:'dark',3:'wind',4:'sticky',5:'crumb',6:'fog',9:'scramble',11:'brk'},
   // 2 flashlight=lights out · 3 handheld fan=strong winds · 4 blueberry jam=sticky shelf · 5 potato chips=crumb mess
   // 6 cup noodle=steam fog · 9 cookie tin=shuffle scramble · 11 strawberry milk=Soso break
-  sec:{lock:4,dark:6,wind:6,brk:10,sticky:6,fog:5,crumbAuto:8},
+  // seconds. lock / wind / break / sticky run their full time and cannot be cut short. crumbs last until every shelf is wiped.
+  // lights out + steam fog: stay for at least *Min seconds, end after *Packs sets are packed, and never exceed *Max seconds.
+  sec:{lock:4,wind:6,brk:10,sticky:6, darkMin:4,darkMax:6,darkPacks:2, fogMin:5,fogMax:10,fogPacks:2},
+  maxAtOnce:2,                       // at most 2 obstructions active at the same time (extras wait in a short queue)
   types:[2,3,4,5,6,8,9,10,11],       // the 9 items stocked in Versus: flashlight, fan, jam, chips, noodle, tuna, tin, shampoo, strawberry milk
   refreshCD:20,                      // Soso's manual refresh cooldown in Versus (seconds)
-  loserAfter:3, loserSeconds:10, loserPacks:2,   // comeback mode: after being hit 3x in a row without sending one, 2 packs = 1 obstruction for 10 s
+  loserAfter:3, loserSeconds:10, loserPacks:2,
+  behindRatio:2, behindMin:4, loserAfterBehind:2,   // if the opponent's score is >= 2x yours (and at least 4), comeback mode needs only 2 hits in a row   // comeback mode: after being hit 3x in a row without sending one, 2 packs = 1 obstruction for 10 s
   stickyHold:.8,                     // seconds you must hold an item on a jammed slot before it lifts
   stickySlots:2, fogShelves:3, crumbShelves:4,
 };
@@ -912,14 +922,15 @@ function dealForMode(){if(MP&&MP.seed!=null){RNG=mulberry(MP.seed);try{deal()}fi
 
 
 // ---- sound effects (asset/audio/sfx/*.mp3) · all follow the Sound ON/OFF setting ----
-const SFX_FILES={light:'light.mp3',lock:'lock.mp3',shield:'shield.mp3',wind:'wind.mp3',strawberrymilk:'strawberrymilk.mp3',jam:'jam.mp3',steam:'steam.mp3',crumbs:'crumbs_last_2_seconds.mp3',fever:'fevertime.mp3'};
-const SFX_DIR='asset/audio/sfx/',CRUMB_TAIL=2;                 // crumbs: only the LAST 2 seconds of the file play
+const SFX_FILES={light:'light.mp3',lock:'lock.mp3',shield:'shield.mp3',wind:'wind.mp3',strawberrymilk:'strawberrymilk.mp3',jam:'jam.mp3',steam:'steam.mp3',crumbs:'crumbs_last_2_seconds.mp3',fever:'fevertime.mp3',shuffle:'shuffle.mp3'};
+const SFX_DIRS=['audio/','asset/audio/sfx/'],CRUMB_TAIL=2;   // looks in /audio/ first (where your files are), then asset/audio/sfx/                 // crumbs: only the LAST 2 seconds of the file play
 let sfxCtx=null,sfxMaster=null;const sfxBuf={},sfxLive=new Set();
+function sfxFetch(f,i=0){return fetch(SFX_DIRS[i]+f+'?v=2').then(r=>{if(!r.ok)throw 0;return r}).catch(e=>i+1<SFX_DIRS.length?sfxFetch(f,i+1):Promise.reject(e))}
 function sfxInit(){
  if(sfxCtx){if(sfxCtx.state!=='running')sfxCtx.resume().catch(()=>{});return}
  try{const AC=window.AudioContext||window.webkitAudioContext;sfxCtx=new AC();sfxMaster=sfxCtx.createGain();sfxMaster.connect(sfxCtx.destination);
   sfxCtx.resume().catch(()=>{});
-  Object.entries(SFX_FILES).forEach(([k,f])=>fetch(SFX_DIR+f+'?v=1').then(r=>r.arrayBuffer()).then(ab=>new Promise((ok,no)=>sfxCtx.decodeAudioData(ab,ok,no))).then(b=>{sfxBuf[k]=b}).catch(()=>{}));
+  Object.entries(SFX_FILES).forEach(([k,f])=>sfxFetch(f).then(r=>r.arrayBuffer()).then(ab=>new Promise((ok,no)=>sfxCtx.decodeAudioData(ab,ok,no))).then(b=>{sfxBuf[k]=b}).catch(()=>{}));
  }catch(e){sfxCtx=null}
 }
 ['pointerup','touchend','click','keydown'].forEach(ev=>addEventListener(ev,sfxInit,true));
@@ -934,16 +945,12 @@ function sfxStopAll(){[...sfxLive].forEach(x=>x.stop())}
 // Obstruction sound rules: lights out + lock = start AND end · wind + strawberry-milk break = looped for the whole obstruction
 // steam = at start · crumbs = last 2 s of its file at start · jam = each time you try to move an item (see pointerdown)
 function obStart(k){const s=MP.sfx;
- if(k==='lock')sfxPlay('lock');else if(k==='dark')sfxPlay('light');else if(k==='fog')sfxPlay('steam');else if(k==='crumb')sfxPlay('crumbs',{tail:CRUMB_TAIL});
+ if(k==='lock')sfxPlay('lock');else if(k==='dark')sfxPlay('light');else if(k==='fog')sfxPlay('steam');else if(k==='crumb')sfxPlay('crumbs',{tail:CRUMB_TAIL});else if(k==='scramble')sfxPlay('shuffle');
  else if(k==='wind'){if(s.wind)s.wind.stop();s.wind=sfxPlay('wind',{loop:true})}
  else if(k==='brk'){if(s.brk)s.brk.stop();s.brk=sfxPlay('strawberrymilk',{loop:true})}}
 function obEnd(k){const s=MP.sfx;
  if(k==='lock')sfxPlay('lock');else if(k==='dark')sfxPlay('light');
  else if(k==='wind'&&s.wind){s.wind.stop();s.wind=null}else if(k==='brk'&&s.brk){s.brk.stop();s.brk=null}}
-function obClearAll(withEndSounds){const o=MP.ob;
- if(o.lock){o.lock=null;if(withEndSounds)obEnd('lock')}if(o.dark>0){o.dark=0;if(withEndSounds)obEnd('dark')}
- if(o.wind>0){o.wind=0;obEnd('wind')}if(o.brk>0){o.brk=0;obEnd('brk')}o.sticky=o.fog=null;o.crumb=[]}
-
 // ---- network layer (PeerJS room code · or ?net=local BroadcastChannel for testing on one computer) ----
 const NET={kind:'peer',peer:null,conn:null,bc:null,me:Math.random().toString(36).slice(2),open:false,lastRx:0,hb:0,on:{}};
 const netKind=()=>/[?&]net=local/.test(location.search)?'local':'peer';
@@ -959,6 +966,10 @@ function netOpened(){if(NET.open)return;NET.open=true;NET.lastRx=performance.now
  if(NET.on.open)NET.on.open()}
 function netLost(why){const f=NET.on.close;clearInterval(NET.hb);NET.hb=0;NET.open=false;if(f)f(why)}
 function loadPeerJS(){return new Promise((ok,no)=>{if(window.Peer)return ok();const s=document.createElement('script');s.src='https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js';s.onload=ok;s.onerror=()=>no(new Error('load'));document.head.appendChild(s)})}
+function watchIce(c,cb){            // report a blocked network instead of waiting forever
+ try{const pc=c.peerConnection;if(!pc)return;pc.addEventListener('iceconnectionstatechange',()=>{
+  if(pc.iceConnectionState==='failed'){if(NET.open)netLost('ice');else if(cb.err)cb.err('Network blocked the link - try the same Wi-Fi')}})}catch(e){}
+}
 function netHost(code,cb){
  NET.kind=netKind();NET.on=cb;
  if(NET.kind==='local'){const bc=NET.bc=new BroadcastChannel('sososs-'+code);
@@ -967,7 +978,7 @@ function netHost(code,cb){
  loadPeerJS().then(()=>{
   const p=NET.peer=new Peer('sososs-'+code,{config:ICE});
   p.on('open',()=>cb.ready&&cb.ready());
-  p.on('connection',c=>{if(NET.conn){c.close();return}NET.conn=c;c.on('data',netRx);c.on('close',()=>netLost('closed'));c.on('error',()=>netLost('error'));if(c.open)netOpened();else c.on('open',netOpened)});
+  p.on('connection',c=>{if(NET.conn){c.close();return}NET.conn=c;watchIce(c,cb);c.on('data',netRx);c.on('close',()=>netLost('closed'));c.on('error',()=>netLost('error'));if(c.open)netOpened();else c.on('open',netOpened)});
   p.on('error',e=>{if(e.type==='unavailable-id')cb.taken&&cb.taken();else cb.err&&cb.err('Connection problem ('+e.type+')')});
   p.on('disconnected',()=>{try{p.reconnect()}catch(e){}});
  }).catch(()=>cb.err&&cb.err("Can't reach the matchmaking server"));
@@ -977,30 +988,32 @@ function netJoin(code,cb){
  if(NET.kind==='local'){const bc=NET.bc=new BroadcastChannel('sososs-'+code);
   bc.onmessage=e=>{const m=e.data;if(!m||m.from===NET.me)return;if(m.d.t==='__welcome')netOpened();else netRx(m.d)};
   let n=0;const t=setInterval(()=>{if(NET.open||++n>12){clearInterval(t);if(!NET.open&&cb.err)cb.err('Room not found');return}bc.postMessage({from:NET.me,d:{t:'__hello'}})},250);return}
+ let gotSrv=false;if(cb.stage)cb.stage('Contacting server');
+ setTimeout(()=>{if(!gotSrv&&!NET.open&&state==='lobby'&&cb.err)cb.err("Can't reach the matchmaking server")},10000);
  loadPeerJS().then(()=>{
   const p=NET.peer=new Peer({config:ICE});
-  p.on('open',()=>{const c=NET.conn=p.connect('sososs-'+code,{reliable:true});c.on('data',netRx);c.on('close',()=>netLost('closed'));c.on('error',()=>netLost('error'));if(c.open)netOpened();else c.on('open',netOpened)});
+  p.on('open',()=>{gotSrv=true;if(cb.stage)cb.stage('Connecting to your friend');const c=NET.conn=p.connect('sososs-'+code,{reliable:true});watchIce(c,cb);c.on('data',netRx);c.on('close',()=>netLost('closed'));c.on('error',()=>netLost('error'));if(c.open)netOpened();else c.on('open',netOpened)});
   p.on('error',e=>{cb.err&&cb.err(e.type==='peer-unavailable'?'Room not found':'Connection problem ('+e.type+')')});
  }).catch(()=>cb.err&&cb.err("Can't reach the matchmaking server"));
- setTimeout(()=>{if(!NET.open&&cb.err&&state==='lobby')cb.err('Room not found')},12000);
+ setTimeout(()=>{if(!NET.open&&cb.err&&state==='lobby')cb.err('Could not connect - check the code')},25000);
 }
 
 // ---- lobby screens ----
-const LB={ui:'menu',code:'',input:'',err:'',tries:0};
+const LB={ui:'menu',code:'',input:'',err:'',tries:0,ready:false,stage:''};
 function openLobby(){netClose();LB.ui='menu';LB.err='';LB.input='';state='lobby'}
 function lobbyFail(s){netClose();LB.ui='error';LB.err=s}
 function lobbyCreate(){
- LB.ui='hosting';LB.code=''+(1000+Math.floor(Math.random()*9000));
+ LB.ui='hosting';LB.ready=false;LB.code=''+(1000+Math.floor(Math.random()*9000));
  netHost(LB.code,{
-  ready(){},
+  ready(){LB.ready=true},
   taken(){if(++LB.tries>6){lobbyFail('Could not open a room');return}netClose();lobbyCreate()},
   err:lobbyFail,
   open(){mpStart(true)},
   msg:mpOnMsg,close:mpOnClose});
 }
 function lobbyJoin(){
- LB.ui='connecting';
- netJoin(LB.input,{err:lobbyFail,open(){LB.ui='connecting'},msg:mpOnMsg,close:mpOnClose});
+ LB.ui='connecting';LB.stage='Contacting server';
+ netJoin(LB.input,{stage(s){LB.stage=s},err:lobbyFail,open(){LB.ui='connecting'},msg:mpOnMsg,close:mpOnClose});
 }
 function lobbyButtons(){
  const B=(id,y,label)=>({id,x:BTN_X,y,w:BTN_W,h:BTN_H,label});
@@ -1022,12 +1035,13 @@ function drawLobby(){
  rr(24,100,312,LB.ui==='joining'?400:360,22,'rgba(255,255,255,.94)','#a9c9ee',2.5);
  txt('Versus',W/2,150,34,'#ff6b9a');
  if(LB.ui==='menu'){plain('Play a friend online',W/2,186,15,'#3d5a80')}
+ else if(LB.ui==='hosting'&&!LB.ready){plain('Opening room'+'.'.repeat(1+Math.floor(clock*2)%3),W/2,260,20,'#3d5a80')}
  else if(LB.ui==='hosting'){plain('Your room code',W/2,200,17,'#3d5a80');plain(LB.code.split('').join(' '),W/2,268,50,'#2a6fc4');
   plain('Tell your friend to tap',W/2,312,14,'#7f9bbf');plain('Versus > Join Room',W/2,332,14,'#7f9bbf');plain('Waiting for opponent'+'.'.repeat(1+Math.floor(clock*2)%3),W/2,372,15,'#3d5a80')}
  else if(LB.ui==='joining'){plain('Enter room code',W/2,190,17,'#3d5a80');
   for(let i=0;i<4;i++){rr(80+i*52,200,44,38,8,'#eef6fd',MENU_INK,2.5);if(LB.input[i])plain(LB.input[i],102+i*52,228,26)}}
- else if(LB.ui==='connecting'){plain('Connecting'+'.'.repeat(1+Math.floor(clock*2)%3),W/2,250,20,'#3d5a80')}
- else if(LB.ui==='error'){plain(LB.err,W/2,250,16,'#e05a7a')}
+ else if(LB.ui==='connecting'){plain((LB.stage||'Connecting')+'.'.repeat(1+Math.floor(clock*2)%3),W/2,250,18,'#3d5a80')}
+ else if(LB.ui==='error'){const ws=LB.err.split(' - ');plain(ws[0],W/2,240,15,'#e05a7a');if(ws[1])plain(ws[1],W/2,262,13,'#7f9bbf')}
  lobbyButtons().forEach(b=>menuButton(b.x,b.y,b.w,b.h,b.label,b.id==='kgo'?['#a6dafc','#79c2f6']:['#eef6fd','#dcebfa'],UI.press===b.id,b.id[0]==='k'&&b.id.length===2?20:b.id==='kdel'||b.id==='kgo'?14:19));
  if(LB.ui!=='joining')drawSoso(W/2,608,.38,{face:LB.ui==='error'?'n':'h',arms:'side'});
 }
@@ -1035,19 +1049,20 @@ function drawLobby(){
 // ---- match state ----
 function mpNew(host){return{host,seed:null,cd:3.2,score:0,x2:0,shield:0,lad:0,packed:[],lastCombo:0,stT:0,
  sfx:{wind:null,brk:null},hits:0,loser:0,loserN:0,opp:{score:0,combo:0,shield:0,x2:0,lo:0},oppFin:null,oppLeft:false,fin:false,waitT:0,leaving:false,
- ob:{lock:null,sticky:null,fog:null,dark:0,wind:0,brk:0,crumb:[]}}}
+ queue:[],ob:mpFreshOb()}}
+function mpFreshOb(){return{lock:null,sticky:null,fog:null,dark:null,wind:0,brk:0,crumb:[]}}
 function mpApplySettings(){if(MP_SAVED)return;MP_SAVED={combo:Object.assign({},COMBO_SETTINGS),maxBonus:GAME_SETTINGS.maxBonusTimePerGame};
  Object.assign(COMBO_SETTINGS,VS.combo);GAME_SETTINGS.maxBonusTimePerGame=VS.maxBonus}
 function mpTeardown(){
  if(MP&&MP.fin===false&&state==='play'){}   // (leaving mid-match: opponent is told by the 'bye' sent before this)
  if(MP_SAVED){Object.assign(COMBO_SETTINGS,MP_SAVED.combo);GAME_SETTINGS.maxBonusTimePerGame=MP_SAVED.maxBonus;MP_SAVED=null}
- try{sfxStopAll()}catch(e){}MP=null;netClose();
+ try{sfxStopAll()}catch(e){}MP=null;netClose();setTrack(MUSIC_FILE);
 }
 function mpStart(host){
  if(host){const seed=1+Math.floor(Math.random()*2e9);netSend({t:'start',seed,ver:VS.ver});mpBegin(true,seed)}
 }
 function mpBegin(host,seed){
- MP=mpNew(host);MP.seed=seed;mpApplySettings();
+ MP=mpNew(host);MP.seed=seed;mpApplySettings();musicHeld=false;setTrack(MUSIC_VS);
  newGame();time=VS.duration;timerPeak=time;scoreSaved=true;MP.cd=3.2;state='play';
 }
 function mpOnMsg(m){
@@ -1068,7 +1083,7 @@ function mpOnClose(why){
 }
 function mpTimeUp(left){
  time=0;state='over';endT=0;drag=null;MP.fin=true;MP.waitT=0;
- MP.ob={lock:null,sticky:null,fog:null,dark:0,wind:0,brk:0,crumb:[]};sfxStopAll();
+ MP.ob=mpFreshOb();MP.queue=[];sfxStopAll();
  netSend({t:'fin',s:MP.score});
 }
 const mpReady=()=>MP.oppFin!=null||MP.oppLeft||MP.waitT>6;
@@ -1085,8 +1100,8 @@ function mpPickKind(){
 }
 function mpOnMatch(pc,t){
  MP.score+=MP.x2>0?2:1;MP.packed.push(t);
- // COUNTER: completing a set while an obstruction is active ends it early
- if(mpActive()){obClearAll(true);msg={t:1.4,s:'Counter!'}}
+ // lights out / steam fog end after N sets are packed (see VS.sec)
+ if(MP.ob.dark)MP.ob.dark.packs++;if(MP.ob.fog)MP.ob.fog.packs++;
  const lp=MP.lad;MP.lad=combo<COMBO_SETTINGS.activationMatches?0:pc>=COMBO_SETTINGS.activationMatches?lp+1:combo;
  const cross=n=>n>0&&Math.floor(MP.lad/n)>Math.floor(lp/n);
  const sendOb=()=>{const k=mpPickKind(),n=k==='lock'?lockCountFor(combo):0;MP.packed=[];MP.hits=0;netSend({t:'ob',k,n});msg={t:1.6,s:'Sent: '+OB_NAME[k]+'!'}};
@@ -1096,22 +1111,38 @@ function mpOnMatch(pc,t){
  if(cross(VS.x2Every)){MP.x2=VS.x2Seconds;msg={t:1.6,s:'x2 SCORE!'}}
  if(cross(VS.shieldEvery)&&MP.shield<VS.shieldMax){MP.shield++;msg={t:1.6,s:'Shield ready!'}}
 }
-const mpActive=()=>{const o=MP.ob;return !!(o.lock||o.sticky||o.fog||o.dark>0||o.wind>0||o.brk>0||o.crumb.length)};
-
 // ---- receiving obstructions ----
 const openCells=()=>{const a=[];for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++)if(isOpen(r,c))a.push([r,c]);return a};
 const pickCells=(n,pref)=>{const a=shuf(openCells());if(pref)a.sort((x,y)=>(G[y[0]][y[1]].slots.some(s=>s.f)?1:0)-(G[x[0]][x[1]].slots.some(s=>s.f)?1:0)+(Math.random()-.5)*.01);return a.slice(0,n)};
+const OB_TIMED=['lock','dark','wind','brk','sticky','fog','crumb'];
+function obIsActive(k){const o=MP.ob;return k==='crumb'?o.crumb.length>0:(k==='wind'||k==='brk')?o[k]>0:!!o[k]}
+const obCount=()=>OB_TIMED.filter(obIsActive).length;
 function mpApplyOb(kind,n){
- const o=MP.ob;
  if(MP.shield>0){MP.shield--;netSend({t:'blocked',k:kind});msg={t:1.8,s:'Shield blocked '+OB_NAME[kind]+'!'};return}
+ mpEnter(kind,n);
+}
+// Rules: lights out + steam fog never run together (the newcomer is swapped for another obstruction),
+// and at most VS.maxAtOnce obstructions are active - extras wait their turn.
+function mpEnter(kind,n){
+ const o=MP.ob;
+ if((kind==='dark'&&o.fog)||(kind==='fog'&&o.dark)){
+  const all=['lock','wind','brk','sticky','crumb','scramble'],free=all.filter(k=>!obIsActive(k)),pool=free.length?free:all;
+  kind=pool[rnd(pool.length)];
+ }
+ if(kind!=='scramble'&&!obIsActive(kind)&&obCount()>=VS.maxAtOnce){if(MP.queue.length<3)MP.queue.push({kind,n});return}
+ mpStartOb(kind,n);
+}
+function mpStartOb(kind,n){
+ const o=MP.ob;
  msg={t:1.4,s:OB_NAME[kind]+'!'};
- if(++MP.hits>=VS.loserAfter&&MP.loser<=0){MP.loser=VS.loserSeconds;MP.loserN=0;MP.hits=0;sfxPlay('fever');netSend({t:'lo'});setTimeout(()=>{if(MP)msg={t:2,s:'COMEBACK MODE!'}},900)}
- if(kind==='lock')o.lock={t:VS.sec.lock,cells:pickCells(Math.max(1,n))};
- else if(kind==='dark')o.dark=VS.sec.dark;
+ const behind=MP.opp.score>=VS.behindMin&&MP.opp.score>=VS.behindRatio*MP.score;
+ if(++MP.hits>=(behind?VS.loserAfterBehind:VS.loserAfter)&&MP.loser<=0){MP.loser=VS.loserSeconds;MP.loserN=0;MP.hits=0;sfxPlay('fever');netSend({t:'lo'});setTimeout(()=>{if(MP)msg={t:2,s:'COMEBACK MODE!'}},900)}
+ if(kind==='lock')o.lock={t:VS.sec.lock,cells:pickCells(Math.max(1,n||2))};
+ else if(kind==='dark')o.dark={age:0,packs:0};
  else if(kind==='wind')o.wind=VS.sec.wind;
  else if(kind==='brk')o.brk=VS.sec.brk;
- else if(kind==='fog')o.fog={t:VS.sec.fog,cells:pickCells(VS.fogShelves,true)};
- else if(kind==='crumb')o.crumb=pickCells(VS.crumbShelves,true).map(([r,c])=>({r,c,t:VS.sec.crumbAuto}));
+ else if(kind==='fog')o.fog={age:0,packs:0,cells:pickCells(VS.fogShelves,true)};
+ else if(kind==='crumb')o.crumb=pickCells(VS.crumbShelves,true).map(([r,c])=>({r,c}));
  else if(kind==='sticky'){const sl=[];openCells().forEach(([r,c])=>{for(let i=0;i<3;i++)if(!blocked(r,c,i))sl.push([r,c,i,G[r][c].slots[i].f?0:1])});
   sl.sort((a,b)=>a[3]-b[3]+(Math.random()-.5)*1.5);o.sticky={t:VS.sec.sticky,slots:sl.slice(0,VS.stickySlots)}}
  else if(kind==='scramble')mpScramble();
@@ -1145,11 +1176,11 @@ function mpUpdate(dt){
  const o=MP.ob;
  if(o.lock&&(o.lock.t-=dt)<=0){o.lock=null;obEnd('lock')}
  if(o.sticky&&(o.sticky.t-=dt)<=0)o.sticky=null;
- if(o.fog&&(o.fog.t-=dt)<=0)o.fog=null;
- {const d0=o.dark>0,w0=o.wind>0,b0=o.brk>0;o.dark=Math.max(0,o.dark-dt);o.wind=Math.max(0,o.wind-dt);o.brk=Math.max(0,o.brk-dt);
-  if(d0&&!o.dark)obEnd('dark');if(w0&&!o.wind)obEnd('wind');if(b0&&!o.brk)obEnd('brk')}
+ if(o.dark){const d=o.dark;d.age+=dt;if((d.age>=VS.sec.darkMin&&d.packs>=VS.sec.darkPacks)||d.age>=VS.sec.darkMax){o.dark=null;obEnd('dark')}}
+ if(o.fog){const f=o.fog;f.age+=dt;if((f.age>=VS.sec.fogMin&&f.packs>=VS.sec.fogPacks)||f.age>=VS.sec.fogMax)o.fog=null}
+ {const w0=o.wind>0,b0=o.brk>0;o.wind=Math.max(0,o.wind-dt);o.brk=Math.max(0,o.brk-dt);if(w0&&!o.wind)obEnd('wind');if(b0&&!o.brk)obEnd('brk')}
+ for(let k=0;k<3&&MP.queue.length&&obCount()<VS.maxAtOnce;k++){const q=MP.queue.shift();mpEnter(q.kind,q.n)}   // a slot freed up
  MP.x2=Math.max(0,MP.x2-dt);MP.loser=Math.max(0,MP.loser-dt);if(!MP.loser)MP.loserN=0;
- o.crumb.forEach(q=>q.t-=dt);o.crumb=o.crumb.filter(q=>q.t>0);
  if(combo===0&&MP.lastCombo>0){MP.lad=0;MP.packed=[]}MP.lastCombo=combo;
  if(drag&&drag.hold>0){drag.hold-=dt;if(drag.hold<=0){drag.it.x=drag.px;drag.it.y=drag.py-16}}
  if((MP.stT-=dt)<=0){MP.stT=.4;netSend({t:'st',s:MP.score,c:combo,sh:MP.shield,x:Math.ceil(MP.x2),lo:Math.ceil(MP.loser)})}
@@ -1161,7 +1192,7 @@ function drawVsBoardFX(){
  if(o.sticky)o.sticky.slots.forEach(([r,c,i])=>{const x=slotX(c,i),y=slotY(r)+14;
   ctx.fillStyle='rgba(88,64,170,.85)';ctx.beginPath();ctx.ellipse(x,y,22,9,0,0,7);ctx.fill();ctx.fillStyle='rgba(180,160,255,.55)';ctx.beginPath();ctx.ellipse(x-6,y-3,7,2.6,0,0,7);ctx.fill();
   ctx.fillStyle='rgba(88,64,170,.85)';ctx.beginPath();ctx.ellipse(x+14,y+7,4,6,0,0,7);ctx.fill()});
- if(o.fog)o.fog.cells.forEach(([r,c])=>{const x=X0+c*CWD,y=Y0+r*RH;ctx.save();ctx.globalAlpha=Math.min(1,o.fog.t*2);
+ if(o.fog)o.fog.cells.forEach(([r,c])=>{const x=X0+c*CWD,y=Y0+r*RH;ctx.save();ctx.globalAlpha=Math.min(1,o.fog.age*3);
   rr(x+3,y+3,CWD-6,RH-6,8,'rgba(238,246,255,.93)');
   for(let k=0;k<6;k++){const px=x+16+k*18+Math.sin(clock*1.6+k)*5,py=y+30+(k%3)*22+Math.cos(clock*1.3+k*2)*4;ci(px,py,16+(k%2)*5,'rgba(255,255,255,.9)')}ctx.restore()});
  o.crumb.forEach(q=>{const x=X0+q.c*CWD,y=Y0+q.r*RH;rr(x+3,y+3,CWD-6,RH-6,8,'rgba(150,100,50,.22)');
@@ -1176,7 +1207,7 @@ function drawVsBoardFX(){
   for(let k=0;k<9;k++){const yy=Y0+20+k*44+(k%2)*12,xx=((clock*420+k*97)%520)-80;ctx.beginPath();ctx.moveTo(xx,yy);ctx.bezierCurveTo(xx+30,yy-8,xx+60,yy+8,xx+90,yy);ctx.stroke()}}
 }
 function drawVsDark(){
- if(!(MP.ob.dark>0))return;
+ if(!MP.ob.dark)return;
  const lp=lastPtr,bx=X0-8,by=Y0-8,bw=CWD*COLS+16,bh=RH*ROWS+16;
  ctx.save();ctx.beginPath();ctx.roundRect(bx,by,bw,bh,12);ctx.roundRect(lp[0]-CWD/2,lp[1]-RH/2,CWD,RH,14);
  ctx.fillStyle='rgba(6,12,34,.96)';ctx.fill('evenodd');
@@ -1191,11 +1222,17 @@ function drawVsHUD(){
  if(MP.x2>0)chip('x2  '+Math.ceil(MP.x2)+'s','#fff2b8','#c08a10');
  if(MP.shield>0)chip('SHIELD','#d8ecff','#2a6fc4');
  if(MP.loser>0)chip('COMEBACK  '+Math.ceil(MP.loser)+'s','#ffe0c4','#d0661a');
- // banner for the obstruction currently on you
- const act=[];if(o.lock)act.push(['lock',o.lock.t]);if(o.dark>0)act.push(['dark',o.dark]);if(o.wind>0)act.push(['wind',o.wind]);if(o.brk>0)act.push(['brk',o.brk]);
- if(o.sticky)act.push(['sticky',o.sticky.t]);if(o.fog)act.push(['fog',o.fog.t]);if(o.crumb.length)act.push(['crumb',o.crumb[0].t]);
- if(act.length){const[k,t]=act[0],pulse=.6+.4*Math.sin(clock*8);ctx.globalAlpha=pulse;txt(OB_NAME[k]+(k==='crumb'?'':'  '+Math.ceil(t)+'s'),W/2,Y0+RH*ROWS+24,15,'#e05a7a');ctx.globalAlpha=1;
-  plain('Pack a set to cancel it!',W/2,Y0+RH*ROWS+38,11,'#7f9bbf')}
+ // banner(s) for the obstruction(s) currently on you (max 2)
+ const act=[];
+ if(o.lock)act.push('LOCKED CABINETS  '+Math.ceil(o.lock.t)+'s');
+ if(o.dark)act.push('LIGHTS OUT  '+Math.ceil(VS.sec.darkMax-o.dark.age)+'s max  ('+Math.min(o.dark.packs,VS.sec.darkPacks)+'/'+VS.sec.darkPacks+' sets)');
+ if(o.fog)act.push('STEAM FOG  '+Math.ceil(VS.sec.fogMax-o.fog.age)+'s max  ('+Math.min(o.fog.packs,VS.sec.fogPacks)+'/'+VS.sec.fogPacks+' sets)');
+ if(o.wind>0)act.push('STRONG WINDS  '+Math.ceil(o.wind)+'s');
+ if(o.brk>0)act.push('SOSO ON BREAK  '+Math.ceil(o.brk)+'s');
+ if(o.sticky)act.push('STICKY SHELF  '+Math.ceil(o.sticky.t)+'s');
+ if(o.crumb.length)act.push('CRUMB MESS  wipe '+o.crumb.length+' shelf'+(o.crumb.length>1?'es':''));
+ ctx.globalAlpha=.65+.35*Math.sin(clock*8);
+ act.slice(0,2).forEach((s,i)=>txt(s,W/2,Y0+RH*ROWS+22+i*15,act.length>1?12:14,'#e05a7a'));ctx.globalAlpha=1;
 }
 function drawVsCountdown(){
  if(!(MP.cd>0))return;ctx.fillStyle='rgba(30,60,110,.35)';ctx.fillRect(0,0,W,H);
