@@ -125,19 +125,14 @@ const MUSIC_VS_LIST=['asset/audio/stockshufflers.mp3'],MUSIC_VS=MUSIC_VS_LIST[0]
 const SOUND_KEY='sosoStockShuffle.sound',BEST_KEY='sosoStockShuffle.best';
 const store={get(k){try{return localStorage.getItem(k)}catch(e){return null}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
 let soundOn=store.get(SOUND_KEY)!=='off';                  // Sound ON / OFF (saved on the device)
-const normalMusic=new Audio(MUSIC_FILE),versusMusic=new Audio(MUSIC_VS);
-[normalMusic,versusMusic].forEach(a=>{a.loop=true;a.preload='auto';a.volume=1});
-let vsTry=0;
-versusMusic.addEventListener('error',()=>{                 // file not found → try the next folder, finally fall back to the normal track
- if(++vsTry<MUSIC_VS_LIST.length){versusMusic.src=MUSIC_VS_LIST[vsTry];versusMusic.load();if(gameplayMusic===versusMusic&&shouldPlay())startMusic()}
- else if(gameplayMusic===versusMusic){gameplayMusic=normalMusic;if(shouldPlay())startMusic()}
+// ONE audio element plays every BGM track: the Versus track is just a different src on the same element, so two tracks can
+// never play at the same time (separate elements were what let the normal and Versus BGM overlap).
+const gameplayMusic=new Audio(MUSIC_FILE);
+gameplayMusic.loop=true;gameplayMusic.preload='auto';gameplayMusic.volume=1;
+let musicTrack=MUSIC_FILE;                                 // which file is loaded right now
+gameplayMusic.addEventListener('error',()=>{               // Versus file missing / unreadable → fall back to the normal track
+ if(musicTrack===MUSIC_VS)setTrack(MUSIC_FILE);
 });
-let gameplayMusic=normalMusic;                             // the track currently in use (Versus swaps it)
-let vsPrimed=false;
-function primeVersus(){                                    // unlock the Versus track during a real tap so it can start later without one
- if(vsPrimed)return;vsPrimed=true;
- try{versusMusic.muted=true;const p=versusMusic.play();const done=()=>{if(gameplayMusic!==versusMusic)versusMusic.pause();versusMusic.currentTime=0;versusMusic.muted=false};if(p)p.then(done).catch(()=>{vsPrimed=false;versusMusic.muted=false});else done()}catch(e){vsPrimed=false}
-}
 // Rules: ON → the track plays from launch (after the first touch if the browser insists) and replays after every result screen.
 //        OFF → the track is stopped and the audio session released, so the phone's own music/podcasts can play over the game.
 //        Result screen → music stops; it comes back on the next touch (the tap that starts the next round).
@@ -146,7 +141,7 @@ const shouldPlay=()=>soundOn&&musicWanted&&!musicHeld;
 const UNLOCK_EVENTS=['pointerdown','pointerup','touchend','mouseup','click','keydown'];
 function armUnlock(){UNLOCK_EVENTS.forEach(ev=>addEventListener(ev,unlockMusic,true));}
 function disarmUnlock(){UNLOCK_EVENTS.forEach(ev=>removeEventListener(ev,unlockMusic,true));}
-function unlockMusic(){startMusic();primeVersus()}
+function unlockMusic(){startMusic()}
 function startMusic(){
  if(!shouldPlay())return;
  try{if(navigator.audioSession)navigator.audioSession.type='playback'}catch(e){}   // play even with the iPhone silent switch on
@@ -156,14 +151,23 @@ function startMusic(){
 function stopMusic(){gameplayMusic.pause();try{if(navigator.audioSession)navigator.audioSession.type='auto'}catch(e){}}
 function setSound(on){soundOn=on;store.set(SOUND_KEY,on?'on':'off');if(on){armUnlock();startMusic()}else{stopMusic();sfxStopAll()}}
 function setTrack(file){                                  // swap BGM (Versus uses its own track)
- const next=file===MUSIC_VS?versusMusic:normalMusic;
- if(next===gameplayMusic)return;
- gameplayMusic.pause();gameplayMusic=next;gameplayMusic.currentTime=0;
+ if(musicTrack===file)return;
+ musicTrack=file;
+ gameplayMusic.pause();gameplayMusic.src=file;gameplayMusic.load();      // same element → the old track is gone before the new one starts
  if(shouldPlay()){armUnlock();startMusic()}
 }
 function holdMusicForResult(){musicHeld=true;stopMusic()}                    // result screen appears
 function releaseMusicForNewRound(){musicHeld=false;gameplayMusic.currentTime=0;armUnlock();startMusic()}
 armUnlock();startMusic();
+// Watchdog: phones silently pause the BGM / suspend the SFX engine (another sound starts, a call or notification comes in…).
+// Every 1.5 s: BGM should be playing but is paused → restart it; SFX engine suspended → resume it.
+let wdT=0;
+function audioWatchdog(dt){
+ wdT+=dt;if(wdT<1.5)return;wdT=0;
+ if(document.hidden)return;
+ if(shouldPlay()&&gameplayMusic.paused){const p=gameplayMusic.play();if(p)p.catch(()=>{})}
+ if(soundOn&&sfxCtx&&sfxCtx.state!=='running')sfxCtx.resume().catch(()=>{});
+}
 document.addEventListener('visibilitychange',()=>{
  if(document.hidden){musicWanted=false;gameplayMusic.pause()}
  else{musicWanted=true;armUnlock();startMusic()}});
@@ -578,7 +582,7 @@ document.addEventListener('visibilitychange',()=>{if(document.hidden)setPause(tr
 
 
 // ===================== 8. UPDATE =====================
-function update(dt){clock+=dt;if(state=='over'&&!musicHeld)holdMusicForResult();if(state=='title'){updateTitle(dt);return}if(state=='option'||state=='lobby')return;if(state=='pause'||state=='homePrompt'||soundOpen)return;if(TUT)updateTutorial(dt);if(state=='play'&&refreshAnim){updateRefresh(dt);return;}if(state=='over')drag=null;shufCD=Math.max(0,shufCD-dt);
+function update(dt){clock+=dt;audioWatchdog(dt);if(state=='over'&&!musicHeld)holdMusicForResult();if(state=='title'){updateTitle(dt);return}if(state=='option'||state=='lobby')return;if(state=='pause'||state=='homePrompt'||soundOpen)return;if(TUT)updateTutorial(dt);if(state=='play'&&refreshAnim){updateRefresh(dt);return;}if(state=='over')drag=null;shufCD=Math.max(0,shufCD-dt);
  G.forEach((row,r)=>row.forEach(cp=>{if(cp.door>=0||cp.lock>=0){const op=cp.door>=0?boxes>=DOOR_AT[cp.door]:boxes>=UNLOCK_AT[cp.lock];cp.dop+=((op?1:0)-cp.dop)*Math.min(1,dt*6)}}));
  if(MP&&state=='play'&&MP.cd>0){MP.cd-=dt}else if(state=='play'&&!TUT){updateCombo(dt);if(MP)mpUpdate(dt);time-=dt;if(time<=0){time=0;if(MP)mpTimeUp();else{state='over';endT=0}}}else if(state=='over'){endT+=dt;if(MP)MP.waitT+=dt;if(!scoreSaved){scoreSaved=true;if(boxes>highScore){highScore=boxes;store.set(BEST_KEY,String(boxes))}}}
  msg.t=Math.max(0,msg.t-dt);
@@ -1077,7 +1081,7 @@ function mpStart(host){
  if(host){const seed=1+Math.floor(Math.random()*2e9);netSend({t:'start',seed,ver:VS.ver});mpBegin(true,seed)}
 }
 function mpBegin(host,seed){
- MP=mpNew(host);MP.seed=seed;mpApplySettings();musicHeld=false;setTrack(MUSIC_VS);
+ MP=mpNew(host);MP.seed=seed;mpApplySettings();musicHeld=false;setTrack(MUSIC_VS);startMusic();
  newGame();time=VS.duration;timerPeak=time;scoreSaved=true;MP.cd=3.2;state='play';
 }
 function mpOnMsg(m){
